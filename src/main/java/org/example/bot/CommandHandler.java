@@ -130,10 +130,10 @@ public class CommandHandler {
         String callText = AdminCommandConfig.CALL_MESSAGE_TEXT;
         if (callText == null || callText.isBlank()
                 || callText.contains(AdminCommandConfig.CALL_MESSAGE_PLACEHOLDER)) {
-            message.getChannel().sendMessage("Заполни текст команды !зов в AdminCommandConfig.javacd /Users/tembot/IdeaProjects/kojima_bot\n" +
-                    "git add Dockerfile .dockerignore README.md\n" +
-                    "git commit -m \"Add Docker deployment support\"\n" +
-                    "git push\n").queue();
+            message.getChannel().sendMessage("Братва общий сбор на FACEIT\n" +
+                    "Братва общий сбор на FACEIT\\n" +
+                    "Братва общий сбор на FACEIT\\n" +
+                    "Братва общий сбор на FACEIT\\n").queue();
             return;
         }
 
