@@ -5,7 +5,7 @@ public final class AdminCommandConfig {
     public static final String CALL_MESSAGE_PLACEHOLDER = "VSTAV_TEKST_DLYA_KOMANDY_ZOV";
 
     public static final String CALL_MESSAGE_TEXT = """
-            VSTAV_TEKST_DLYA_KOMANDY_ZOV
+            Братва общий сбор на FACEIT
             """;
 
     private AdminCommandConfig() {
