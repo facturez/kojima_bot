@@ -3,6 +3,7 @@ package org.example.bot;
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.Member;
+import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 import org.example.db.MessageRepository;
@@ -46,7 +47,7 @@ public class CommandHandler {
                     !ping - проверить, что бот отвечает
                     !stats - статистика по сохраненным сообщениям
                     !last [n] - последние n сообщений из этого канала
-                    !зов - админская команда, тегает всех и пишет текст 3 раза
+                    !зов - команда для админов и роли "я ухожу", тегает всех и пишет текст 3 раза
                     !clear [n] / !очистить [n] - админская очистка последних сообщений
                     """).queue();
             case "ping" -> channel.sendMessage("Pong! Бот на связи.").queue();
@@ -123,7 +124,7 @@ public class CommandHandler {
     }
 
     private void callEveryone(Message message) {
-        if (!ensureAdmin(message)) {
+        if (!ensureCallPermission(message)) {
             return;
         }
 
@@ -211,5 +212,32 @@ public class CommandHandler {
         }
 
         return true;
+    }
+
+    private boolean ensureCallPermission(Message message) {
+        Member member = message.getMember();
+        if (member == null) {
+            message.getChannel().sendMessage("Эта команда работает только на сервере.").queue();
+            return false;
+        }
+
+        if (member.hasPermission(Permission.ADMINISTRATOR)) {
+            return true;
+        }
+
+        for (Role role : member.getRoles()) {
+            if (AdminCommandConfig.CALL_ALLOWED_ROLE_IDS.contains(role.getId())) {
+                return true;
+            }
+
+            for (String allowedRoleName : AdminCommandConfig.CALL_ALLOWED_ROLE_NAMES) {
+                if (role.getName().equalsIgnoreCase(allowedRoleName)) {
+                    return true;
+                }
+            }
+        }
+
+        message.getChannel().sendMessage("Эта команда доступна только администраторам и роли \"управленец\".").queue();
+        return false;
     }
 }
