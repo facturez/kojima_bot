@@ -9,8 +9,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 public class MessageRepository {
     private final String databaseUrl;
@@ -98,8 +100,39 @@ public class MessageRepository {
         return messages;
     }
 
-    private void initialize() {
+    public Optional<LocalDate> getLastDailyMessageDate() {
+        String sql = "SELECT value FROM scheduler_state WHERE key = 'daily_message_last_sent_date'";
+        try (Connection connection = openConnection();
+             Statement statement = connection.createStatement();
+             ResultSet resultSet = statement.executeQuery(sql)) {
+            if (!resultSet.next()) {
+                return Optional.empty();
+            }
+
+            return Optional.of(LocalDate.parse(resultSet.getString("value")));
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read daily message state", e);
+        }
+    }
+
+    public void setLastDailyMessageDate(LocalDate date) {
         String sql = """
+                INSERT INTO scheduler_state(key, value)
+                VALUES ('daily_message_last_sent_date', ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """;
+
+        try (Connection connection = openConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, date.toString());
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to save daily message state", e);
+        }
+    }
+
+    private void initialize() {
+        String messagesSql = """
                 CREATE TABLE IF NOT EXISTS messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     message_id TEXT NOT NULL UNIQUE,
@@ -112,10 +145,17 @@ public class MessageRepository {
                     stored_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """;
+        String schedulerStateSql = """
+                CREATE TABLE IF NOT EXISTS scheduler_state (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+                """;
 
         try (Connection connection = openConnection();
              Statement statement = connection.createStatement()) {
-            statement.execute(sql);
+            statement.execute(messagesSql);
+            statement.execute(schedulerStateSql);
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to initialize database", e);
         }

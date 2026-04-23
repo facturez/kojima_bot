@@ -39,7 +39,8 @@ public class Main {
                     jda,
                     ScheduledMessageConfig.DAILY_CHANNEL_ID,
                     dailyMessageSupplier,
-                    ScheduledMessageConfig.TIME_ZONE
+                    ScheduledMessageConfig.TIME_ZONE,
+                    repository
             );
             scheduler.start();
 
