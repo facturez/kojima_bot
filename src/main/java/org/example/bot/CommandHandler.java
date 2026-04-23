@@ -46,7 +46,7 @@ public class CommandHandler {
                     !ping - проверить, что бот отвечает
                     !stats - статистика по сохраненным сообщениям
                     !last [n] - последние n сообщений из этого канала
-                    !зов - админская команда, тегает всех и пишет заданный текст 3 раза
+                    !зов - админская команда, тегает всех и пишет текст 3 раза
                     !clear [n] / !очистить [n] - админская очистка последних сообщений
                     """).queue();
             case "ping" -> channel.sendMessage("Pong! Бот на связи.").queue();
@@ -128,12 +128,8 @@ public class CommandHandler {
         }
 
         String callText = AdminCommandConfig.CALL_MESSAGE_TEXT;
-        if (callText == null || callText.isBlank()
-                || callText.contains(AdminCommandConfig.CALL_MESSAGE_PLACEHOLDER)) {
-            message.getChannel().sendMessage("Братва общий сбор на FACEIT\n" +
-                    "Братва общий сбор на FACEIT\\n" +
-                    "Братва общий сбор на FACEIT\\n" +
-                    "Братва общий сбор на FACEIT\\n").queue();
+        if (callText == null || callText.isBlank()) {
+            message.getChannel().sendMessage("Заполни текст команды !зов в AdminCommandConfig.java").queue();
             return;
         }
 
