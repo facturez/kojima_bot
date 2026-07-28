@@ -31,12 +31,21 @@
 В Discord Developer Portal для бота должен быть включён:
 - `MESSAGE CONTENT INTENT`
 
-На сервере боту нужны права:
-- `Send Messages`
-- `Manage Messages`
-- `Mention Everyone`
+### Права пользователя
 
-Для упрощения можно выдать `Administrator`.
+- `Manage Messages` — для вызова `!last`.
+
+Команда `!last` читает сохранённый SQLite-архив, поэтому для неё самому боту не требуется право `Read Message History`. Команда доступна только в серверных каналах. `!clear` остаётся админской командой по проверке в коде.
+
+### Права бота
+
+- `View Channel` и `Send Messages` — для команд и ежедневного сообщения.
+- `Read Message History` и `Manage Messages` — для `!clear`.
+- `Mention Everyone` — только в каналах, где используется `!зов`.
+
+Выдавайте эти права только нужным каналам; не используйте `Administrator` как сокращённую замену списка разрешений.
+
+Доступ к `!зов` дополнительно настраивается в `AdminCommandConfig.CALL_ALLOWED_ROLE_IDS`: указывайте Discord ID ролей, а не их названия. Пустой список не даёт доступ по роли.
 
 ## Переменные окружения
 
@@ -51,7 +60,12 @@ export DISCORD_TOKEN="your_discord_bot_token"
 ```bash
 export BOT_DB_PATH="bot-data.db"
 export DAILY_CHANNEL_ID="123456789012345678"
+export MESSAGE_RETENTION_DAYS="30"
 ```
+
+- `BOT_DB_PATH` — путь к SQLite-файлу. В Docker-образе по умолчанию используется `/app/data/bot-data.db`.
+- `DAILY_CHANNEL_ID` — ID канала ежедневного сообщения; если он не задан, используется значение из `ScheduledMessageConfig`.
+- `MESSAGE_RETENTION_DAYS` — положительное целое число; значение по умолчанию `30`.
 
 ## Конфиг в коде
 
@@ -60,7 +74,7 @@ export DAILY_CHANNEL_ID="123456789012345678"
 - ежедневное сообщение и базовая дата: `src/main/java/org/example/bot/ScheduledMessageConfig.java`
 - текст для `!зов`: `src/main/java/org/example/bot/AdminCommandConfig.java`
 
-Если `DAILY_CHANNEL_ID` не задан через окружение, бот возьмёт значение из `ScheduledMessageConfig`.
+Ежедневное сообщение отправляется в `00:00` по часовому поясу `Europe/Moscow`.
 
 ## Запуск
 
@@ -78,10 +92,34 @@ java -jar target/kojima_bot-1.0-SNAPSHOT-jar-with-dependencies.jar
 
 Или можно просто запустить `org.example.Main` из IDE.
 
+## Деплой на хост
+
+В репозитории есть `Dockerfile`, поэтому хост может собирать проект без автоопределения Java-сборки.
+
+Если деплоишь на Railway или похожий хостинг:
+- используй Docker deployment
+- передай `DISCORD_TOKEN` как переменную окружения
+- при необходимости передай `DAILY_CHANNEL_ID` и `MESSAGE_RETENTION_DAYS`
+- лучше запускать сервис как worker, а не как публичный web-service
+
+Runtime-образ запускает бот от отдельного пользователя и группы `kojima` с UID/GID `10001`. SQLite хранится в закрытом каталоге `/app/data` с правами только для этого пользователя. Подключайте постоянный volume именно к `/app/data`; каталог на хосте или том должен быть доступен UID/GID `10001` и не должен быть доступен для записи группе или всем пользователям. Иначе бот не сможет создать или обновить базу. Без постоянного volume SQLite-файл пропадёт при пересоздании контейнера.
+
+Пример локального запуска с заранее подготовленным приватным каталогом данных:
+
+```bash
+docker build -t kojima-bot .
+docker run --rm \
+  -e DISCORD_TOKEN \
+  -e DAILY_CHANNEL_ID="123456789012345678" \
+  -v "$PWD/data:/app/data" \
+  kojima-bot
+```
+
 ## Ограничения
 
 - `!clear` может массово удалять только сообщения моложе 14 дней: это ограничение Discord API
-- база сейчас локальная и хранится в SQLite
+- база локальная и хранится в SQLite
+- записи архива старше `MESSAGE_RETENTION_DAYS` удаляются при запуске и перед чтением `!last`; удаление сообщений в Discord также удаляет соответствующие записи из архива
 
 ## Структура проекта
 
@@ -103,6 +141,5 @@ src/main/java/org/example/
 
 - slash-команды
 - вынесение конфига в `.env` или `application.properties`
-- Dockerfile
 - деплой на VPS
 - более подробное логирование
