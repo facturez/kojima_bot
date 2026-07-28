@@ -75,6 +75,10 @@ public class CommandHandler {
     }
 
     private void sendRecentMessages(Message message, String[] parts) {
+        if (!ensureArchiveReadPermission(message)) {
+            return;
+        }
+
         int limit = 5;
         if (parts.length > 1) {
             try {
@@ -221,23 +225,34 @@ public class CommandHandler {
             return false;
         }
 
-        if (member.hasPermission(Permission.ADMINISTRATOR)) {
+        List<String> memberRoleIds = member.getRoles().stream()
+                .map(Role::getId)
+                .toList();
+        if (CommandAuthorization.canCallEveryone(
+                member.hasPermission(Permission.ADMINISTRATOR),
+                memberRoleIds,
+                AdminCommandConfig.CALL_ALLOWED_ROLE_IDS
+        )) {
             return true;
         }
 
-        for (Role role : member.getRoles()) {
-            if (AdminCommandConfig.CALL_ALLOWED_ROLE_IDS.contains(role.getId())) {
-                return true;
-            }
+        message.getChannel().sendMessage("Эта команда доступна только администраторам и настроенным ролям.").queue();
+        return false;
+    }
 
-            for (String allowedRoleName : AdminCommandConfig.CALL_ALLOWED_ROLE_NAMES) {
-                if (role.getName().equalsIgnoreCase(allowedRoleName)) {
-                    return true;
-                }
-            }
+    private boolean ensureArchiveReadPermission(Message message) {
+        Member member = message.getMember();
+        boolean canReadArchive = CommandAuthorization.canReadArchive(
+                message.isFromGuild(),
+                member != null && member.hasPermission(Permission.MESSAGE_MANAGE)
+        );
+        if (canReadArchive) {
+            return true;
         }
 
-        message.getChannel().sendMessage("Эта команда доступна только администраторам и роли \"управленец\".").queue();
+        message.getChannel().sendMessage(
+                "Команда !last доступна только на сервере участникам с правом управления сообщениями."
+        ).queue();
         return false;
     }
 }
