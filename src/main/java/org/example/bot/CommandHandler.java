@@ -62,16 +62,21 @@ public class CommandHandler {
     }
 
     private void sendStats(Message message) {
-        long totalMessages = repository.countMessages();
-        long currentUserMessages = repository.countMessagesByAuthor(message.getAuthor().getId());
+        try {
+            long totalMessages = repository.countMessages();
+            long currentUserMessages = repository.countMessagesByAuthor(message.getAuthor().getId());
 
-        String response = """
-                Статистика базы:
-                Всего сообщений: %d
-                Твоих сообщений: %d
-                """.formatted(totalMessages, currentUserMessages);
+            String response = """
+                    Статистика базы:
+                    Всего сообщений: %d
+                    Твоих сообщений: %d
+                    """.formatted(totalMessages, currentUserMessages);
 
-        message.getChannel().sendMessage(response).queue();
+            message.getChannel().sendMessage(response).queue();
+        } catch (RuntimeException failure) {
+            System.err.println("Failed to read message archive: " + failure.getMessage());
+            message.getChannel().sendMessage("Не получилось прочитать архив сообщений.").queue();
+        }
     }
 
     private void sendRecentMessages(Message message, String[] parts) {
@@ -93,38 +98,43 @@ public class CommandHandler {
             }
         }
 
-        List<StoredMessage> recentMessages = repository.findRecentMessages(message.getChannel().getId(), limit);
-        if (recentMessages.isEmpty()) {
-            message.getChannel().sendMessage("В базе пока нет сообщений для этого канала.").queue();
-            return;
-        }
-
-        StringBuilder builder = new StringBuilder("Последние сообщения:\n");
-        for (StoredMessage storedMessage : recentMessages) {
-            String preview = storedMessage.content().isBlank() ? "[пустое сообщение]" : storedMessage.content();
-            if (preview.length() > 90) {
-                preview = preview.substring(0, 87) + "...";
+        try {
+            List<StoredMessage> recentMessages = repository.findRecentMessages(message.getChannel().getId(), limit);
+            if (recentMessages.isEmpty()) {
+                message.getChannel().sendMessage("В базе пока нет сообщений для этого канала.").queue();
+                return;
             }
 
-            String line = new StringBuilder()
-                    .append("- ")
-                    .append(TIME_FORMATTER.format(storedMessage.createdAt()))
-                    .append(" | ")
-                    .append(storedMessage.authorTag())
-                    .append(": ")
-                    .append(preview)
-                    .append('\n')
-                    .toString();
+            StringBuilder builder = new StringBuilder("Последние сообщения:\n");
+            for (StoredMessage storedMessage : recentMessages) {
+                String preview = storedMessage.content().isBlank() ? "[пустое сообщение]" : storedMessage.content();
+                if (preview.length() > 90) {
+                    preview = preview.substring(0, 87) + "...";
+                }
 
-            if (builder.length() + line.length() > 1800) {
-                builder.append("... список обрезан, чтобы влезть в сообщение Discord.\n");
-                break;
+                String line = new StringBuilder()
+                        .append("- ")
+                        .append(TIME_FORMATTER.format(storedMessage.createdAt()))
+                        .append(" | ")
+                        .append(storedMessage.authorTag())
+                        .append(": ")
+                        .append(preview)
+                        .append('\n')
+                        .toString();
+
+                if (builder.length() + line.length() > 1800) {
+                    builder.append("... список обрезан, чтобы влезть в сообщение Discord.\n");
+                    break;
+                }
+
+                builder.append(line);
             }
 
-            builder.append(line);
+            message.getChannel().sendMessage(builder.toString()).queue();
+        } catch (RuntimeException failure) {
+            System.err.println("Failed to read message archive: " + failure.getMessage());
+            message.getChannel().sendMessage("Не получилось прочитать архив сообщений.").queue();
         }
-
-        message.getChannel().sendMessage(builder.toString()).queue();
     }
 
     private void callEveryone(Message message) {
@@ -198,8 +208,9 @@ public class CommandHandler {
             } else {
                 textChannel.purgeMessages(recentMessages);
             }
-            message.delete().queue(null, failure -> {
-            });
+            message.delete().queue(null, failure -> System.err.println(
+                    "Failed to delete clear command message: " + failure.getMessage()
+            ));
 
             if (skippedOldMessages > 0) {
                 textChannel.sendMessage("Удалил " + recentMessages.size() + " сообщений. "

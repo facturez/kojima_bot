@@ -1,5 +1,7 @@
 package org.example.bot;
 
+import net.dv8tion.jda.api.events.message.MessageBulkDeleteEvent;
+import net.dv8tion.jda.api.events.message.MessageDeleteEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import org.example.db.MessageRepository;
@@ -21,5 +23,27 @@ public class MessageListener extends ListenerAdapter {
 
         repository.saveMessage(event.getMessage());
         commandHandler.handle(event.getMessage());
+    }
+
+    @Override
+    public void onMessageDelete(MessageDeleteEvent event) {
+        deleteArchivedMessage(event.getMessageId());
+    }
+
+    @Override
+    public void onMessageBulkDelete(MessageBulkDeleteEvent event) {
+        try {
+            repository.deleteMessages(event.getMessageIds());
+        } catch (RuntimeException failure) {
+            System.err.println("Failed to delete archived messages: " + failure.getMessage());
+        }
+    }
+
+    void deleteArchivedMessage(String messageId) {
+        try {
+            repository.deleteMessage(messageId);
+        } catch (RuntimeException failure) {
+            System.err.println("Failed to delete archived message: " + failure.getMessage());
+        }
     }
 }
