@@ -60,11 +60,16 @@ public class DailyMessageScheduler {
 
     private void scheduleNextRun() {
         ZonedDateTime now = ZonedDateTime.now(zoneId);
-        ZonedDateTime nextRun = now.toLocalDate().plusDays(1).atStartOfDay(zoneId);
+        ZonedDateTime nextRun = nextRunAfter(now, zoneId);
         long delayMillis = Duration.between(now, nextRun).toMillis();
 
         System.out.println("Next daily message at: " + nextRun);
         scheduler.schedule(this::sendAndReschedule, delayMillis, TimeUnit.MILLISECONDS);
+    }
+
+    static ZonedDateTime nextRunAfter(ZonedDateTime now, ZoneId zoneId) {
+        ZonedDateTime zonedNow = now.withZoneSameInstant(zoneId);
+        return zonedNow.toLocalDate().plusDays(1).atStartOfDay(zoneId);
     }
 
     private void sendAndReschedule() {
