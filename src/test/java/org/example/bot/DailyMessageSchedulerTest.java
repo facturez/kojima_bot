@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class DailyMessageSchedulerTest {
     @Test
     void schedulesNextMoscowMidnightIndependentlyOfInputOffset() {
-        ZonedDateTime now = ZonedDateTime.parse("2026-07-28T23:30:00+02:00[Europe/Berlin]");
+        ZonedDateTime now = ZonedDateTime.parse("2026-07-28T22:30:00+02:00[Europe/Berlin]");
 
         ZonedDateTime next = DailyMessageScheduler.nextRunAfter(now, ZoneId.of("Europe/Moscow"));
 
