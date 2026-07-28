@@ -41,7 +41,7 @@ public class CommandHandler {
         MessageChannel channel = message.getChannel();
 
         switch (command) {
-            case "help" -> channel.sendMessage("""
+            case "help" -> sendMessage(channel, """
                     Доступные команды:
                     !help - показать список команд
                     !ping - проверить, что бот отвечает
@@ -49,13 +49,13 @@ public class CommandHandler {
                     !last [n] - последние n сообщений из этого канала
                     !зов - команда для админов и роли "я ухожу", тегает всех и пишет текст 3 раза
                     !clear [n] / !очистить [n] - админская очистка последних сообщений
-                    """).queue();
-            case "ping" -> channel.sendMessage("Pong! Бот на связи.").queue();
+                    """);
+            case "ping" -> sendMessage(channel, "Pong! Бот на связи.");
             case "stats" -> sendStats(message);
             case "last" -> sendRecentMessages(message, parts);
             case "зов" -> callEveryone(message);
             case "clear", "очистить" -> clearMessages(message, parts);
-            default -> channel.sendMessage("Неизвестная команда. Используй !help").queue();
+            default -> sendMessage(channel, "Неизвестная команда. Используй !help");
         }
 
         return true;
@@ -72,10 +72,10 @@ public class CommandHandler {
                     Твоих сообщений: %d
                     """.formatted(totalMessages, currentUserMessages);
 
-            message.getChannel().sendMessage(response).queue();
+            sendMessage(message.getChannel(), response);
         } catch (RuntimeException failure) {
             System.err.println("Failed to read message archive: " + failure.getMessage());
-            message.getChannel().sendMessage("Не получилось прочитать архив сообщений.").queue();
+            sendMessage(message.getChannel(), "Не получилось прочитать архив сообщений.");
         }
     }
 
@@ -89,11 +89,11 @@ public class CommandHandler {
             try {
                 limit = Integer.parseInt(parts[1]);
                 if (limit < 1 || limit > 20) {
-                    message.getChannel().sendMessage("Число после !last должно быть от 1 до 20.").queue();
+                    sendMessage(message.getChannel(), "Число после !last должно быть от 1 до 20.");
                     return;
                 }
             } catch (NumberFormatException ignored) {
-                message.getChannel().sendMessage("Число после !last должно быть от 1 до 20.").queue();
+                sendMessage(message.getChannel(), "Число после !last должно быть от 1 до 20.");
                 return;
             }
         }
@@ -101,7 +101,7 @@ public class CommandHandler {
         try {
             List<StoredMessage> recentMessages = repository.findRecentMessages(message.getChannel().getId(), limit);
             if (recentMessages.isEmpty()) {
-                message.getChannel().sendMessage("В базе пока нет сообщений для этого канала.").queue();
+                sendMessage(message.getChannel(), "В базе пока нет сообщений для этого канала.");
                 return;
             }
 
@@ -130,10 +130,10 @@ public class CommandHandler {
                 builder.append(line);
             }
 
-            message.getChannel().sendMessage(builder.toString()).queue();
+            sendMessage(message.getChannel(), builder.toString());
         } catch (RuntimeException failure) {
             System.err.println("Failed to read message archive: " + failure.getMessage());
-            message.getChannel().sendMessage("Не получилось прочитать архив сообщений.").queue();
+            sendMessage(message.getChannel(), "Не получилось прочитать архив сообщений.");
         }
     }
 
@@ -144,13 +144,13 @@ public class CommandHandler {
 
         String callText = AdminCommandConfig.CALL_MESSAGE_TEXT;
         if (callText == null || callText.isBlank()) {
-            message.getChannel().sendMessage("Заполни текст команды !зов в AdminCommandConfig.java").queue();
+            sendMessage(message.getChannel(), "Заполни текст команды !зов в AdminCommandConfig.java");
             return;
         }
 
         String payload = "@everyone " + callText.trim();
         for (int i = 0; i < AdminCommandConfig.CALL_REPEAT_COUNT; i++) {
-            message.getChannel().sendMessage(payload).queue();
+            sendMessage(message.getChannel(), payload);
         }
     }
 
@@ -160,7 +160,7 @@ public class CommandHandler {
         }
 
         if (!message.isFromGuild()) {
-            message.getChannel().sendMessage("Эта команда работает только в серверных текстовых каналах.").queue();
+            sendMessage(message.getChannel(), "Эта команда работает только в серверных текстовых каналах.");
             return;
         }
 
@@ -169,19 +169,22 @@ public class CommandHandler {
             try {
                 amountToDelete = Integer.parseInt(parts[1]);
             } catch (NumberFormatException ignored) {
-                message.getChannel().sendMessage("Используй !clear <число от 1 до 100>.").queue();
+                sendMessage(message.getChannel(), "Используй !clear <число от 1 до 100>.");
                 return;
             }
         }
 
         if (amountToDelete < 1 || amountToDelete > 100) {
-            message.getChannel().sendMessage("Можно удалить только от 1 до 100 сообщений за раз.").queue();
+            sendMessage(message.getChannel(), "Можно удалить только от 1 до 100 сообщений за раз.");
             return;
         }
 
         TextChannel textChannel = message.getGuild().getTextChannelById(message.getChannel().getId());
         if (textChannel == null) {
-            message.getChannel().sendMessage("Эта команда сейчас поддерживается только в обычных текстовых каналах сервера.").queue();
+            sendMessage(
+                    message.getChannel(),
+                    "Эта команда сейчас поддерживается только в обычных текстовых каналах сервера."
+            );
             return;
         }
 
@@ -199,12 +202,17 @@ public class CommandHandler {
             }
 
             if (recentMessages.isEmpty()) {
-                message.getChannel().sendMessage("Не нашлось сообщений моложе 14 дней для удаления.").queue();
+                sendMessage(message.getChannel(), "Не нашлось сообщений моложе 14 дней для удаления.");
                 return;
             }
 
             if (recentMessages.size() == 1) {
-                recentMessages.get(0).delete().queue();
+                recentMessages.get(0).delete().queue(
+                        null,
+                        failure -> System.err.println(
+                                "Failed to delete message during clear: " + failure.getMessage()
+                        )
+                );
             } else {
                 textChannel.purgeMessages(recentMessages);
             }
@@ -213,16 +221,23 @@ public class CommandHandler {
             ));
 
             if (skippedOldMessages > 0) {
-                textChannel.sendMessage("Удалил " + recentMessages.size() + " сообщений. "
-                        + skippedOldMessages + " старых сообщений старше 14 дней Discord не дал удалить пачкой.").queue();
+                sendMessage(
+                        textChannel,
+                        "Удалил " + recentMessages.size() + " сообщений. "
+                                + skippedOldMessages
+                                + " старых сообщений старше 14 дней Discord не дал удалить пачкой."
+                );
             }
-        }, failure -> message.getChannel().sendMessage("Не получилось очистить сообщения: " + failure.getMessage()).queue());
+        }, failure -> sendMessage(
+                message.getChannel(),
+                "Не получилось очистить сообщения: " + failure.getMessage()
+        ));
     }
 
     private boolean ensureAdmin(Message message) {
         Member member = message.getMember();
         if (member == null || !member.hasPermission(Permission.ADMINISTRATOR)) {
-            message.getChannel().sendMessage("Эта команда доступна только администраторам.").queue();
+            sendMessage(message.getChannel(), "Эта команда доступна только администраторам.");
             return false;
         }
 
@@ -232,7 +247,7 @@ public class CommandHandler {
     private boolean ensureCallPermission(Message message) {
         Member member = message.getMember();
         if (member == null) {
-            message.getChannel().sendMessage("Эта команда работает только на сервере.").queue();
+            sendMessage(message.getChannel(), "Эта команда работает только на сервере.");
             return false;
         }
 
@@ -247,7 +262,7 @@ public class CommandHandler {
             return true;
         }
 
-        message.getChannel().sendMessage("Эта команда доступна только администраторам и настроенным ролям.").queue();
+        sendMessage(message.getChannel(), "Эта команда доступна только администраторам и настроенным ролям.");
         return false;
     }
 
@@ -261,9 +276,17 @@ public class CommandHandler {
             return true;
         }
 
-        message.getChannel().sendMessage(
+        sendMessage(
+                message.getChannel(),
                 "Команда !last доступна только на сервере участникам с правом управления сообщениями."
-        ).queue();
+        );
         return false;
+    }
+
+    static void sendMessage(MessageChannel channel, String content) {
+        channel.sendMessage(content).queue(
+                null,
+                failure -> System.err.println("Failed to send Discord message: " + failure.getMessage())
+        );
     }
 }
