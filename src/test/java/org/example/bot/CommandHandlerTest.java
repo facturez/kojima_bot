@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.lang.reflect.Proxy;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -15,6 +17,27 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CommandHandlerTest {
+    @Test
+    void observesFailureFromEveryBulkPurgeOperation() {
+        CompletableFuture<Void> firstPurge = new CompletableFuture<>();
+        CompletableFuture<Void> secondPurge = new CompletableFuture<>();
+        ByteArrayOutputStream errorOutput = new ByteArrayOutputStream();
+        PrintStream originalError = System.err;
+
+        try {
+            System.setErr(new PrintStream(errorOutput));
+            CommandHandler.observePurgeFailures(List.of(firstPurge, secondPurge));
+
+            firstPurge.completeExceptionally(new IllegalStateException("first request failed"));
+            secondPurge.completeExceptionally(new IllegalStateException("second request failed"));
+        } finally {
+            System.setErr(originalError);
+        }
+
+        assertTrue(errorOutput.toString().contains("Failed to purge Discord messages: first request failed"));
+        assertTrue(errorOutput.toString().contains("Failed to purge Discord messages: second request failed"));
+    }
+
     @Test
     void queuesDiscordMessageWithExplicitFailureHandler() {
         AtomicReference<String> sentContent = new AtomicReference<>();

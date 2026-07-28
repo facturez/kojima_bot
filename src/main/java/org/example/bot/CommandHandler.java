@@ -14,6 +14,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 public class CommandHandler {
     private static final String PREFIX = "!";
@@ -214,7 +215,7 @@ public class CommandHandler {
                         )
                 );
             } else {
-                textChannel.purgeMessages(recentMessages);
+                observePurgeFailures(textChannel.purgeMessages(recentMessages));
             }
             message.delete().queue(null, failure -> System.err.println(
                     "Failed to delete clear command message: " + failure.getMessage()
@@ -288,5 +289,14 @@ public class CommandHandler {
                 null,
                 failure -> System.err.println("Failed to send Discord message: " + failure.getMessage())
         );
+    }
+
+    static void observePurgeFailures(List<CompletableFuture<Void>> purgeOperations) {
+        for (CompletableFuture<Void> purgeOperation : purgeOperations) {
+            purgeOperation.exceptionally(failure -> {
+                System.err.println("Failed to purge Discord messages: " + failure.getMessage());
+                return null;
+            });
+        }
     }
 }
