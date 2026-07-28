@@ -10,19 +10,51 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.Clock;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
 public class MessageRepository {
     private final String databaseUrl;
+    private final int retentionDays;
+    private final Clock clock;
 
     public MessageRepository(String databasePath) {
+        this(databasePath, 30, Clock.systemUTC());
+    }
+
+    public MessageRepository(String databasePath, int retentionDays, Clock clock) {
         this.databaseUrl = "jdbc:sqlite:" + databasePath;
+        this.retentionDays = retentionDays;
+        this.clock = clock;
         initialize();
+        deleteExpiredMessages();
     }
 
     public void saveMessage(Message message) {
+        saveStoredMessage(
+                message.getId(),
+                message.getChannel().getId(),
+                message.isFromGuild() ? message.getGuild().getId() : null,
+                message.getAuthor().getId(),
+                message.getAuthor().getAsTag(),
+                message.getContentRaw(),
+                message.getTimeCreated().toInstant()
+        );
+    }
+
+    void saveStoredMessage(
+            String messageId,
+            String channelId,
+            String guildId,
+            String authorId,
+            String authorTag,
+            String content,
+            Instant createdAt
+    ) {
         String sql = """
                 INSERT OR IGNORE INTO messages (
                     message_id, channel_id, guild_id, author_id, author_tag, content, created_at
@@ -31,16 +63,57 @@ public class MessageRepository {
 
         try (Connection connection = openConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, message.getId());
-            statement.setString(2, message.getChannel().getId());
-            statement.setString(3, message.isFromGuild() ? message.getGuild().getId() : null);
-            statement.setString(4, message.getAuthor().getId());
-            statement.setString(5, message.getAuthor().getAsTag());
-            statement.setString(6, message.getContentRaw());
-            statement.setString(7, message.getTimeCreated().toInstant().toString());
+            statement.setString(1, messageId);
+            statement.setString(2, channelId);
+            statement.setString(3, guildId);
+            statement.setString(4, authorId);
+            statement.setString(5, authorTag);
+            statement.setString(6, content);
+            statement.setString(7, createdAt.toString());
             statement.executeUpdate();
         } catch (SQLException e) {
             System.err.println("Failed to save message: " + e.getMessage());
+        }
+    }
+
+    public void deleteMessage(String messageId) {
+        deleteMessages(List.of(messageId));
+    }
+
+    public void deleteMessages(Collection<String> messageIds) {
+        if (messageIds.isEmpty()) {
+            return;
+        }
+
+        String sql = "DELETE FROM messages WHERE message_id = ?";
+        try (Connection connection = openConnection()) {
+            connection.setAutoCommit(false);
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                for (String messageId : messageIds) {
+                    statement.setString(1, messageId);
+                    statement.addBatch();
+                }
+                statement.executeBatch();
+                connection.commit();
+            } catch (SQLException e) {
+                connection.rollback();
+                throw e;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to delete messages", e);
+        }
+    }
+
+    public int deleteExpiredMessages() {
+        String sql = "DELETE FROM messages WHERE created_at < ?";
+        Instant cutoff = clock.instant().minus(retentionDays, ChronoUnit.DAYS);
+
+        try (Connection connection = openConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, cutoff.toString());
+            return statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to delete expired messages", e);
         }
     }
 
@@ -70,6 +143,8 @@ public class MessageRepository {
     }
 
     public List<StoredMessage> findRecentMessages(String channelId, int limit) {
+        deleteExpiredMessages();
+
         String sql = """
                 SELECT author_tag, content, created_at
                 FROM messages

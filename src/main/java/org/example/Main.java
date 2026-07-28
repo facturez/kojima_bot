@@ -6,6 +6,7 @@ import net.dv8tion.jda.api.requests.GatewayIntent;
 import org.example.bot.DailyMessageScheduler;
 import org.example.bot.MessageListener;
 import org.example.bot.ScheduledMessageConfig;
+import org.example.db.MessageRetentionConfig;
 import org.example.db.MessageRepository;
 
 import java.util.function.Supplier;
@@ -20,7 +21,8 @@ public class Main {
         }
 
         String databasePath = System.getenv().getOrDefault("BOT_DB_PATH", "bot-data.db");
-        MessageRepository repository = new MessageRepository(databasePath);
+        int retentionDays = MessageRetentionConfig.parseDays(System.getenv("MESSAGE_RETENTION_DAYS"));
+        MessageRepository repository = new MessageRepository(databasePath, retentionDays, java.time.Clock.systemUTC());
 
         try {
             JDA jda = JDABuilder.createDefault(token)
