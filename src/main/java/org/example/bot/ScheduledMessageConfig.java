@@ -8,9 +8,9 @@ public final class ScheduledMessageConfig {
     public static final ZoneId TIME_ZONE = ZoneId.of("Europe/Moscow");
 
     public static final String DAILY_CHANNEL_ID = getEnvOrDefault("DAILY_CHANNEL_ID", "PASTE_CHANNEL_ID_HERE");
-    public static final String DAILY_MESSAGE_PREFIX = "день без сереги шиянова";
-    public static final LocalDate BASE_DATE = LocalDate.of(2026, 4, 23);
-    public static final int BASE_DAY_NUMBER = 365;
+    public static final String DAILY_MESSAGE_PREFIX = "день без сиеги шиянова";
+    public static final LocalDate BASE_DATE = LocalDate.of(2026, 7, 29);
+    public static final int BASE_DAY_NUMBER = 107;
 
     private ScheduledMessageConfig() {
     }

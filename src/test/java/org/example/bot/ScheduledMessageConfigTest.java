@@ -14,14 +14,20 @@ class ScheduledMessageConfigTest {
     }
 
     @Test
-    void usesBaseDayNumberOnBaseDate() {
-        String message = ScheduledMessageConfig.buildDailyMessageText(LocalDate.of(2026, 4, 23));
-        assertEquals("день без сереги шиянова 365", message);
+    void usesDay107OnJuly29MoscowDate() {
+        String message = ScheduledMessageConfig.buildDailyMessageText(LocalDate.of(2026, 7, 29));
+        assertEquals("день без сиеги шиянова 107", message);
     }
 
     @Test
-    void incrementsDayCounterForNextDay() {
-        String message = ScheduledMessageConfig.buildDailyMessageText(LocalDate.of(2026, 4, 24));
-        assertEquals("день без сереги шиянова 366", message);
+    void incrementsDayCounterForEachFollowingCalendarDay() {
+        assertEquals(
+                "день без сиеги шиянова 108",
+                ScheduledMessageConfig.buildDailyMessageText(LocalDate.of(2026, 7, 30))
+        );
+        assertEquals(
+                "день без сиеги шиянова 109",
+                ScheduledMessageConfig.buildDailyMessageText(LocalDate.of(2026, 7, 31))
+        );
     }
 }
