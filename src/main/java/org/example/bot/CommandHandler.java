@@ -47,8 +47,8 @@ public class CommandHandler {
                     !help - показать список команд
                     !ping - проверить, что бот отвечает
                     !stats - статистика по сохраненным сообщениям
-                    !last [n] - последние n сообщений из этого канала
-                    !зов - команда для админов и роли "я ухожу", тегает всех и пишет текст 3 раза
+                    !last [n] - последние n сообщений из этого канала (требуется Manage Messages)
+                    !зов - команда для администраторов и ролей из CALL_ALLOWED_ROLE_IDS, тегает всех и пишет текст 3 раза
                     !clear [n] / !очистить [n] - админская очистка последних сообщений
                     """);
             case "ping" -> sendMessage(channel, "Pong! Бот на связи.");
@@ -268,10 +268,18 @@ public class CommandHandler {
     }
 
     private boolean ensureArchiveReadPermission(Message message) {
+        if (!message.isFromGuild()) {
+            sendMessage(
+                    message.getChannel(),
+                    "Команда !last доступна только на сервере участникам с правом управления сообщениями."
+            );
+            return false;
+        }
+
         Member member = message.getMember();
         boolean canReadArchive = CommandAuthorization.canReadArchive(
-                message.isFromGuild(),
-                member != null && member.hasPermission(Permission.MESSAGE_MANAGE)
+                true,
+                member != null && member.hasPermission(message.getGuildChannel(), Permission.MESSAGE_MANAGE)
         );
         if (canReadArchive) {
             return true;
