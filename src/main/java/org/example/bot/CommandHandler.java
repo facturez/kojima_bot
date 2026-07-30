@@ -58,9 +58,9 @@ public class CommandHandler {
                     /last [count] - последние сообщения из этого канала (требуется Manage Messages)
                     /зов - тегает всех и призывает БАТВУ на Faceit
                     /clear [count] - админская очистка последних сообщений
-                    /ban user [reason] - бан (требуется Administrator)
-                    /kick user [reason] - исключение (требуется Administrator)
-                    /timeout user duration [reason] - тайм-аут (требуется Administrator); duration: 30m, 2h или 7d
+                    /deport чел [причина] - бан (требуется Administrator)
+                    /magadan чел [причина] - исключение (требуется Administrator)
+                    /kpz чел срок [причина] - тайм-аут (требуется Administrator); срок: 30m, 2h или 7d
                     """);
             case "ping" -> sendMessage(channel, "Pong! Бот на связи.");
             case "stats" -> sendStats(message);
