@@ -336,7 +336,7 @@ class SlashCommandHandlerTest {
         assertEquals("спам", interaction.recordedAuditReason.get());
         assertTrue(interaction.onlyResponse().contains(interaction.targetMember.getAsMention()));
         interaction.assertModerationActionQueuedOnce();
-        interaction.assertAcknowledgedOnceWithoutDeferral();
+        interaction.assertAcknowledgedOnceWithDeferral();
     }
 
     @Test
@@ -355,7 +355,7 @@ class SlashCommandHandlerTest {
         );
         assertTrue(interaction.onlyResponse().contains(interaction.targetMember.getAsMention()));
         interaction.assertModerationActionQueuedOnce();
-        interaction.assertAcknowledgedOnceWithoutDeferral();
+        interaction.assertAcknowledgedOnceWithDeferral();
     }
 
     @Test
@@ -373,7 +373,7 @@ class SlashCommandHandlerTest {
         assertEquals("спам", interaction.recordedAuditReason.get());
         assertTrue(interaction.onlyResponse().contains(interaction.targetMember.getAsMention()));
         interaction.assertModerationActionQueuedOnce();
-        interaction.assertAcknowledgedOnceWithoutDeferral();
+        interaction.assertAcknowledgedOnceWithDeferral();
     }
 
     @Test
@@ -392,35 +392,41 @@ class SlashCommandHandlerTest {
     }
 
     @Test
-    void moderationRepliesOnlyAfterSuccessAndAcknowledgesExactlyOnce() {
+    void moderationDefersImmediatelyAndEditsTheReplyOnlyAfterSuccess() {
         InteractionFixture interaction = InteractionFixture.moderation("ban");
         interaction.completeModerationAutomatically = false;
 
         new SlashCommandHandler(repository()).handle(interaction.event());
 
         assertEquals(List.of(), interaction.responses);
-        assertEquals(0, interaction.acknowledgements.get());
+        interaction.assertModerationActionQueuedOnce();
+        interaction.assertAcknowledgedOnceWithDeferral();
 
         interaction.completeModerationSuccessfully();
 
         assertTrue(interaction.onlyResponse().contains(interaction.targetMember.getAsMention()));
         interaction.assertModerationActionQueuedOnce();
-        interaction.assertAcknowledgedOnceWithoutDeferral();
+        interaction.assertAcknowledgedOnceWithDeferral();
     }
 
     @Test
-    void moderationFailureReturnsASanitizedGenericReplyExactlyOnce() {
+    void moderationDefersImmediatelyAndEditsASanitizedFailureReply() {
         InteractionFixture interaction = InteractionFixture.moderation("timeout");
         interaction.completeModerationAutomatically = false;
 
         new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertEquals(List.of(), interaction.responses);
+        interaction.assertModerationActionQueuedOnce();
+        interaction.assertAcknowledgedOnceWithDeferral();
+
         interaction.failModeration(new IllegalStateException("Discord unavailable"));
 
         String response = interaction.onlyResponse();
         assertEquals("Не получилось выполнить действие модерации. Попробуй позже.", response);
         assertFalse(response.contains("Discord unavailable"));
         interaction.assertModerationActionQueuedOnce();
-        interaction.assertAcknowledgedOnceWithoutDeferral();
+        interaction.assertAcknowledgedOnceWithDeferral();
     }
 
     private RecordingRepository repository() {
@@ -490,6 +496,7 @@ class SlashCommandHandlerTest {
         private String duration = "2h";
         private int retrievePastAmount;
         private int moderationQueueCount;
+        private int acknowledgementsWhenModerationQueued;
         private int banDeleteAmount;
         private TimeUnit banDeleteUnit;
         private ModerationAction moderationAction;
@@ -652,6 +659,7 @@ class SlashCommandHandlerTest {
 
         void assertModerationActionQueuedOnce() {
             assertEquals(1, moderationQueueCount);
+            assertEquals(1, acknowledgementsWhenModerationQueued);
         }
 
         void completeModerationSuccessfully() {
@@ -792,6 +800,7 @@ class SlashCommandHandlerTest {
                     return proxy;
                 }
                 if (method.getName().equals("queue") && method.getParameterCount() == 2) {
+                    acknowledgementsWhenModerationQueued = acknowledgements.get();
                     moderationQueueCount++;
                     @SuppressWarnings("unchecked")
                     Consumer<Void> success = (Consumer<Void>) arguments[0];

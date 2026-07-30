@@ -129,12 +129,15 @@ public class SlashCommandHandler {
             default -> throw new IllegalArgumentException("Unknown moderation command");
         }
 
-        action.reason(auditReason).queue(
-                ignored -> reply(event, confirmation),
-                failure -> {
-                    System.err.println("Failed to execute moderation action: " + failure.getMessage());
-                    reply(event, MODERATION_FAILURE_MESSAGE);
-                }
+        event.deferReply().queue(
+                hook -> action.reason(auditReason).queue(
+                        ignored -> editOriginal(hook, confirmation),
+                        failure -> {
+                            System.err.println("Failed to execute moderation action: " + failure.getMessage());
+                            editOriginal(hook, MODERATION_FAILURE_MESSAGE);
+                        }
+                ),
+                SlashCommandHandler::logReplyFailure
         );
     }
 
