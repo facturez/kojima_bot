@@ -49,3 +49,6 @@ bot-data.db
 
 ### Logs ###
 *.log
+
+### Local Git worktrees ###
+.worktrees/
