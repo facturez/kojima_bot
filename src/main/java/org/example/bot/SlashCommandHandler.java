@@ -49,11 +49,11 @@ public class SlashCommandHandler {
                     /clear [n] - админская очистка последних сообщений
                     /deport user [причина] - депортация из Кодзимы(бан)
                     /magadan user [причина] - этап в магадан(кик)
-                    /kpz user duration [reason] - заключение в петушатник(тайм-аут)
+                    /kpz user duration [reason] - заключение в обезьянник(тайм-аут)
 
                     Обычные команды с ! по-прежнему поддерживаются.
                     """);
-            case "ping" -> reply(event, "Pong! Бот на связи.");
+            case "ping" -> reply(event, "Pong! Бот у апппарата. Слушает батву");
             case "stats" -> sendStats(event);
             case "last" -> sendRecentMessages(event);
             case "зов" -> callEveryone(event);
