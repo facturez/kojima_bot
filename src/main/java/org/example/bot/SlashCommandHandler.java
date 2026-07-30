@@ -33,7 +33,7 @@ public class SlashCommandHandler {
 
     private final MessageRepository repository;
 
-    public SlashCommandHandler(MessageRepository repository) {n
+    public SlashCommandHandler(MessageRepository repository) {
         this.repository = repository;
     }
 
