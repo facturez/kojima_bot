@@ -1,24 +1,33 @@
 package org.example.bot;
 
 import net.dv8tion.jda.api.Permission;
+import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.Role;
+import net.dv8tion.jda.api.entities.User;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.interactions.InteractionHook;
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
+import net.dv8tion.jda.api.requests.restaction.AuditableRestAction;
 import org.example.db.MessageRepository;
 import org.example.db.StoredMessage;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 public class SlashCommandHandler {
+    private static final String DEFAULT_AUDIT_REASON =
+            "Действие выполнено администратором через slash-команду";
+    private static final String MODERATION_FAILURE_MESSAGE =
+            "Не получилось выполнить действие модерации. Попробуй позже.";
     private static final DateTimeFormatter TIME_FORMATTER =
             DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm").withZone(ZoneId.systemDefault());
 
@@ -44,8 +53,103 @@ public class SlashCommandHandler {
             case "last" -> sendRecentMessages(event);
             case "зов" -> callEveryone(event);
             case "clear" -> clearMessages(event);
+            case "ban", "kick", "timeout" -> moderateMember(event);
             default -> reply(event, "Неизвестная команда. Используй /help");
         }
+    }
+
+    private void moderateMember(SlashCommandInteractionEvent event) {
+        Permission required = switch (event.getName()) {
+            case "ban" -> Permission.BAN_MEMBERS;
+            case "kick" -> Permission.KICK_MEMBERS;
+            case "timeout" -> Permission.MODERATE_MEMBERS;
+            default -> throw new IllegalArgumentException("Unknown moderation command");
+        };
+
+        OptionMapping userOption = event.getOption("user");
+        User targetUser = userOption == null ? null : userOption.getAsUser();
+        Member target = userOption == null ? null : userOption.getAsMember();
+        boolean fromGuild = event.isFromGuild();
+        Guild guild = fromGuild ? event.getGuild() : null;
+        Member caller = event.getMember();
+        Member bot = guild == null ? null : guild.getSelfMember();
+        String targetId = targetUser == null ? null : targetUser.getId();
+
+        CommandAuthorization.ModerationDenial denial = CommandAuthorization.checkModeration(
+                fromGuild,
+                caller != null && caller.hasPermission(Permission.ADMINISTRATOR),
+                targetId != null && targetId.equals(event.getUser().getId()),
+                targetId != null && guild != null && targetId.equals(guild.getOwnerId()),
+                targetId != null && bot != null && targetId.equals(bot.getId()),
+                target == null || caller != null && caller.canInteract(target),
+                target == null || bot != null && bot.canInteract(target),
+                bot != null && bot.hasPermission(required)
+        );
+        if (denial != CommandAuthorization.ModerationDenial.NONE) {
+            reply(event, moderationDenialMessage(denial));
+            return;
+        }
+
+        if (target == null || targetUser == null) {
+            reply(event, "Не удалось найти этого участника на сервере.");
+            return;
+        }
+
+        Duration timeoutDuration = null;
+        if (event.getName().equals("timeout")) {
+            try {
+                timeoutDuration = TimeoutDurationParser.parse(
+                        event.getOption("duration", OptionMapping::getAsString)
+                );
+            } catch (IllegalArgumentException invalidDuration) {
+                reply(event, invalidDuration.getMessage());
+                return;
+            }
+        }
+
+        String suppliedReason = event.getOption("reason", "", OptionMapping::getAsString);
+        String auditReason = suppliedReason == null || suppliedReason.isBlank()
+                ? DEFAULT_AUDIT_REASON
+                : suppliedReason.trim();
+        AuditableRestAction<Void> action;
+        String confirmation;
+        switch (event.getName()) {
+            case "ban" -> {
+                action = guild.ban(targetUser, 0, TimeUnit.DAYS);
+                confirmation = "Забанил " + target.getAsMention() + ".";
+            }
+            case "kick" -> {
+                action = target.kick();
+                confirmation = "Исключил " + target.getAsMention() + " с сервера.";
+            }
+            case "timeout" -> {
+                action = target.timeoutFor(timeoutDuration);
+                confirmation = "Выдал тайм-аут " + target.getAsMention() + ".";
+            }
+            default -> throw new IllegalArgumentException("Unknown moderation command");
+        }
+
+        action.reason(auditReason).queue(
+                ignored -> reply(event, confirmation),
+                failure -> {
+                    System.err.println("Failed to execute moderation action: " + failure.getMessage());
+                    reply(event, MODERATION_FAILURE_MESSAGE);
+                }
+        );
+    }
+
+    private String moderationDenialMessage(CommandAuthorization.ModerationDenial denial) {
+        return switch (denial) {
+            case GUILD_ONLY -> "Эта команда работает только на сервере.";
+            case ADMINISTRATOR_REQUIRED -> "Эта команда доступна только администраторам.";
+            case SELF_TARGET -> "Нельзя применить модерацию к самому себе.";
+            case OWNER_TARGET -> "Нельзя применить модерацию к владельцу сервера.";
+            case BOT_SELF_TARGET -> "Нельзя применить модерацию к боту.";
+            case CALLER_HIERARCHY -> "Твоя роль недостаточно высока для модерации этого участника.";
+            case BOT_HIERARCHY -> "Роль бота недостаточно высока для модерации этого участника.";
+            case BOT_PERMISSION -> "У бота нет необходимого права для этой команды.";
+            case NONE -> throw new IllegalArgumentException("No denial message for authorized moderation");
+        };
     }
 
     private void sendStats(SlashCommandInteractionEvent event) {

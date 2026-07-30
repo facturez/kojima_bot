@@ -9,6 +9,7 @@ import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.MessageHistory;
 import net.dv8tion.jda.api.entities.Role;
 import net.dv8tion.jda.api.entities.User;
+import net.dv8tion.jda.api.entities.UserSnowflake;
 import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.GuildChannel;
 import net.dv8tion.jda.api.entities.channel.unions.GuildMessageChannelUnion;
@@ -29,21 +30,31 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Proxy;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SlashCommandHandlerTest {
+    private enum ModerationAction {
+        BAN,
+        KICK,
+        TIMEOUT
+    }
+
     @TempDir
     Path tempDir;
 
@@ -193,6 +204,225 @@ class SlashCommandHandlerTest {
         interaction.assertAcknowledgedOnceWithDeferral();
     }
 
+    @Test
+    void moderationRejectsDirectMessagesWithoutQueueingAnAction() {
+        InteractionFixture interaction = InteractionFixture.directMessageModeration("ban");
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertEquals("Эта команда работает только на сервере.", interaction.onlyResponse());
+        interaction.assertNoModerationAction();
+        interaction.assertAcknowledgedOnceWithoutDeferral();
+    }
+
+    @Test
+    void moderationRequiresAdministratorWithoutQueueingAnAction() {
+        InteractionFixture interaction = InteractionFixture.moderation("ban");
+        interaction.administrator = false;
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertEquals("Эта команда доступна только администраторам.", interaction.onlyResponse());
+        interaction.assertNoModerationAction();
+        interaction.assertAcknowledgedOnceWithoutDeferral();
+    }
+
+    @Test
+    void moderationRejectsTheCallerAsTargetWithoutQueueingAnAction() {
+        InteractionFixture interaction = InteractionFixture.moderation("ban");
+        interaction.targetId = "user-id";
+        interaction.targetIdLong = 1L;
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertEquals("Нельзя применить модерацию к самому себе.", interaction.onlyResponse());
+        interaction.assertNoModerationAction();
+        interaction.assertAcknowledgedOnceWithoutDeferral();
+    }
+
+    @Test
+    void moderationRejectsTheGuildOwnerWithoutQueueingAnAction() {
+        InteractionFixture interaction = InteractionFixture.moderation("ban");
+        interaction.targetId = "owner-id";
+        interaction.targetIdLong = 5L;
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertEquals("Нельзя применить модерацию к владельцу сервера.", interaction.onlyResponse());
+        interaction.assertNoModerationAction();
+        interaction.assertAcknowledgedOnceWithoutDeferral();
+    }
+
+    @Test
+    void moderationRejectsTheBotAsTargetWithoutQueueingAnAction() {
+        InteractionFixture interaction = InteractionFixture.moderation("ban");
+        interaction.targetId = "bot-id";
+        interaction.targetIdLong = 6L;
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertEquals("Нельзя применить модерацию к боту.", interaction.onlyResponse());
+        interaction.assertNoModerationAction();
+        interaction.assertAcknowledgedOnceWithoutDeferral();
+    }
+
+    @Test
+    void moderationRequiresCallerHierarchyWithoutQueueingAnAction() {
+        InteractionFixture interaction = InteractionFixture.moderation("kick");
+        interaction.callerCanInteract = false;
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertEquals(
+                "Твоя роль недостаточно высока для модерации этого участника.",
+                interaction.onlyResponse()
+        );
+        interaction.assertNoModerationAction();
+        interaction.assertAcknowledgedOnceWithoutDeferral();
+    }
+
+    @Test
+    void moderationRequiresBotHierarchyWithoutQueueingAnAction() {
+        InteractionFixture interaction = InteractionFixture.moderation("kick");
+        interaction.botCanInteract = false;
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertEquals(
+                "Роль бота недостаточно высока для модерации этого участника.",
+                interaction.onlyResponse()
+        );
+        interaction.assertNoModerationAction();
+        interaction.assertAcknowledgedOnceWithoutDeferral();
+    }
+
+    @Test
+    void moderationRequiresTheCommandSpecificBotPermissionWithoutQueueingAnAction() {
+        InteractionFixture interaction = InteractionFixture.moderation("timeout");
+        interaction.botHasModerationPermission = false;
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertEquals("У бота нет необходимого права для этой команды.", interaction.onlyResponse());
+        assertEquals(Permission.MODERATE_MEMBERS, interaction.checkedBotPermission.get());
+        interaction.assertNoModerationAction();
+        interaction.assertAcknowledgedOnceWithoutDeferral();
+    }
+
+    @Test
+    void moderationReportsAUserOptionWithoutAResolvedGuildMemberSafely() {
+        InteractionFixture interaction = InteractionFixture.moderation("kick");
+        interaction.targetMemberResolved = false;
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertEquals("Не удалось найти этого участника на сервере.", interaction.onlyResponse());
+        interaction.assertNoModerationAction();
+        interaction.assertAcknowledgedOnceWithoutDeferral();
+    }
+
+    @Test
+    void banUsesTheMentionedUserRequiredPermissionAndTrimmedAuditReason() {
+        InteractionFixture interaction = InteractionFixture.moderation("ban");
+        interaction.reason = "  спам  ";
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertEquals(ModerationAction.BAN, interaction.moderationAction);
+        assertSame(interaction.targetUser, interaction.moderationTarget);
+        assertEquals(0, interaction.banDeleteAmount);
+        assertEquals(TimeUnit.DAYS, interaction.banDeleteUnit);
+        assertEquals(Permission.BAN_MEMBERS, interaction.checkedBotPermission.get());
+        assertEquals("спам", interaction.recordedAuditReason.get());
+        assertTrue(interaction.onlyResponse().contains(interaction.targetMember.getAsMention()));
+        interaction.assertModerationActionQueuedOnce();
+        interaction.assertAcknowledgedOnceWithoutDeferral();
+    }
+
+    @Test
+    void kickUsesTheMentionedMemberAndDefaultAuditReason() {
+        InteractionFixture interaction = InteractionFixture.moderation("kick");
+        interaction.reason = "   ";
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertEquals(ModerationAction.KICK, interaction.moderationAction);
+        assertSame(interaction.targetMember, interaction.moderationTarget);
+        assertEquals(Permission.KICK_MEMBERS, interaction.checkedBotPermission.get());
+        assertEquals(
+                "Действие выполнено администратором через slash-команду",
+                interaction.recordedAuditReason.get()
+        );
+        assertTrue(interaction.onlyResponse().contains(interaction.targetMember.getAsMention()));
+        interaction.assertModerationActionQueuedOnce();
+        interaction.assertAcknowledgedOnceWithoutDeferral();
+    }
+
+    @Test
+    void timeoutUsesTheMentionedMemberAndParsedDuration() {
+        InteractionFixture interaction = InteractionFixture.moderation("timeout");
+        interaction.duration = " 2H ";
+        interaction.reason = "спам";
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertEquals(ModerationAction.TIMEOUT, interaction.moderationAction);
+        assertSame(interaction.targetMember, interaction.moderationTarget);
+        assertEquals(Duration.ofHours(2), interaction.recordedTimeoutDuration.get());
+        assertEquals(Permission.MODERATE_MEMBERS, interaction.checkedBotPermission.get());
+        assertEquals("спам", interaction.recordedAuditReason.get());
+        assertTrue(interaction.onlyResponse().contains(interaction.targetMember.getAsMention()));
+        interaction.assertModerationActionQueuedOnce();
+        interaction.assertAcknowledgedOnceWithoutDeferral();
+    }
+
+    @Test
+    void timeoutReturnsTheParserErrorWithoutQueueingAnAction() {
+        InteractionFixture interaction = InteractionFixture.moderation("timeout");
+        interaction.duration = "forever";
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertEquals(
+                "Длительность должна быть от 1m до 28d. Доступные единицы: m, h, d.",
+                interaction.onlyResponse()
+        );
+        interaction.assertNoModerationAction();
+        interaction.assertAcknowledgedOnceWithoutDeferral();
+    }
+
+    @Test
+    void moderationRepliesOnlyAfterSuccessAndAcknowledgesExactlyOnce() {
+        InteractionFixture interaction = InteractionFixture.moderation("ban");
+        interaction.completeModerationAutomatically = false;
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertEquals(List.of(), interaction.responses);
+        assertEquals(0, interaction.acknowledgements.get());
+
+        interaction.completeModerationSuccessfully();
+
+        assertTrue(interaction.onlyResponse().contains(interaction.targetMember.getAsMention()));
+        interaction.assertModerationActionQueuedOnce();
+        interaction.assertAcknowledgedOnceWithoutDeferral();
+    }
+
+    @Test
+    void moderationFailureReturnsASanitizedGenericReplyExactlyOnce() {
+        InteractionFixture interaction = InteractionFixture.moderation("timeout");
+        interaction.completeModerationAutomatically = false;
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+        interaction.failModeration(new IllegalStateException("Discord unavailable"));
+
+        String response = interaction.onlyResponse();
+        assertEquals("Не получилось выполнить действие модерации. Попробуй позже.", response);
+        assertFalse(response.contains("Discord unavailable"));
+        interaction.assertModerationActionQueuedOnce();
+        interaction.assertAcknowledgedOnceWithoutDeferral();
+    }
+
     private RecordingRepository repository() {
         return new RecordingRepository(tempDir.resolve("archive-" + System.nanoTime() + ".db"));
     }
@@ -235,16 +465,37 @@ class SlashCommandHandlerTest {
         private final AtomicInteger acknowledgements = new AtomicInteger();
         private final AtomicInteger deferrals = new AtomicInteger();
         private final AtomicReference<GuildChannel> permissionChannel = new AtomicReference<>();
+        private final AtomicReference<Permission> checkedBotPermission = new AtomicReference<>();
+        private final AtomicReference<String> recordedAuditReason = new AtomicReference<>();
+        private final AtomicReference<Duration> recordedTimeoutDuration = new AtomicReference<>();
         private final List<String> responses = new ArrayList<>();
         private final MessageChannelUnion channel;
         private final Guild guild;
         private final Member member;
         private final User user;
+        private final User targetUser;
+        private final Member targetMember;
 
         private boolean administrator;
         private boolean guildWidePermissions;
         private boolean manageMessages;
+        private boolean callerCanInteract = true;
+        private boolean botCanInteract = true;
+        private boolean botHasModerationPermission = true;
+        private boolean targetMemberResolved = true;
+        private boolean completeModerationAutomatically = true;
+        private String targetId = "target-id";
+        private long targetIdLong = 99L;
+        private String reason;
+        private String duration = "2h";
         private int retrievePastAmount;
+        private int moderationQueueCount;
+        private int banDeleteAmount;
+        private TimeUnit banDeleteUnit;
+        private ModerationAction moderationAction;
+        private UserSnowflake moderationTarget;
+        private Consumer<Void> moderationSuccess;
+        private Consumer<Throwable> moderationFailure;
         private List<Message> historyMessages = List.of();
         private List<Message> purgedMessages = List.of();
 
@@ -257,19 +508,45 @@ class SlashCommandHandlerTest {
                 case "getIdLong" -> 1L;
                 default -> defaultValue(method.getReturnType());
             });
+            this.targetUser = proxy(User.class, (ignored, method, arguments) -> switch (method.getName()) {
+                case "getId" -> targetId;
+                case "getIdLong" -> targetIdLong;
+                case "getAsMention" -> "<@" + targetIdLong + ">";
+                default -> defaultValue(method.getReturnType());
+            });
             this.channel = createChannel();
             this.guild = fromGuild
                     ? proxy(Guild.class, (ignored, method, arguments) -> switch (method.getName()) {
                         case "getTextChannelById" -> channel;
                         case "getSelfMember" -> botMember();
+                        case "getOwnerId" -> "owner-id";
+                        case "ban" -> {
+                            banDeleteAmount = (int) arguments[1];
+                            banDeleteUnit = (TimeUnit) arguments[2];
+                            yield moderationAction(ModerationAction.BAN, (UserSnowflake) arguments[0]);
+                        }
                         case "getId" -> "guild-id";
                         case "getIdLong" -> 2L;
                         default -> defaultValue(method.getReturnType());
                     })
                     : null;
+            this.targetMember = proxy(Member.class, (ignored, method, arguments) -> switch (method.getName()) {
+                case "getUser" -> targetUser;
+                case "getId" -> targetId;
+                case "getIdLong" -> targetIdLong;
+                case "getAsMention" -> "<@" + targetIdLong + ">";
+                case "getGuild" -> guild;
+                case "kick" -> moderationAction(ModerationAction.KICK, (Member) ignored);
+                case "timeoutFor" -> {
+                    recordedTimeoutDuration.set((Duration) arguments[0]);
+                    yield moderationAction(ModerationAction.TIMEOUT, (Member) ignored);
+                }
+                default -> defaultValue(method.getReturnType());
+            });
             this.member = fromGuild
                     ? proxy(Member.class, (ignored, method, arguments) -> switch (method.getName()) {
                         case "hasPermission" -> hasPermission(arguments);
+                        case "canInteract" -> callerCanInteract;
                         case "getRoles" -> List.<Role>of();
                         case "getUser" -> user;
                         case "getId" -> "user-id";
@@ -291,13 +568,25 @@ class SlashCommandHandlerTest {
             return new InteractionFixture(name, null, false);
         }
 
+        static InteractionFixture moderation(String name) {
+            InteractionFixture interaction = new InteractionFixture(name, null, true);
+            interaction.administrator = true;
+            return interaction;
+        }
+
+        static InteractionFixture directMessageModeration(String name) {
+            InteractionFixture interaction = new InteractionFixture(name, null, false);
+            interaction.administrator = true;
+            return interaction;
+        }
+
         SlashCommandInteractionEvent event() {
             ReplyCallbackAction callback = replyCallback();
             SlashCommandInteraction interaction = proxy(
                     SlashCommandInteraction.class,
                     (ignored, method, arguments) -> switch (method.getName()) {
                         case "getName" -> name;
-                        case "getOptions" -> count == null ? List.of() : List.of(integerOption("count", count));
+                        case "getOptions" -> options();
                         case "getGuild" -> guild;
                         case "getMember" -> member;
                         case "getUser" -> user;
@@ -310,6 +599,27 @@ class SlashCommandHandlerTest {
                     }
             );
             return new SlashCommandInteractionEvent(JDA_PROXY, 0, interaction);
+        }
+
+        private List<OptionMapping> options() {
+            List<OptionMapping> options = new ArrayList<>();
+            if (count != null) {
+                options.add(integerOption("count", count));
+            }
+            if (isModerationCommand()) {
+                options.add(userOption());
+                if (name.equals("timeout")) {
+                    options.add(stringOption("duration", duration));
+                }
+                if (reason != null) {
+                    options.add(stringOption("reason", reason));
+                }
+            }
+            return options;
+        }
+
+        private boolean isModerationCommand() {
+            return name.equals("ban") || name.equals("kick") || name.equals("timeout");
         }
 
         Message historyMessage(OffsetDateTime timeCreated) {
@@ -333,6 +643,25 @@ class SlashCommandHandlerTest {
         void assertAcknowledgedOnceWithDeferral() {
             assertEquals(1, acknowledgements.get());
             assertEquals(1, deferrals.get());
+        }
+
+        void assertNoModerationAction() {
+            assertEquals(0, moderationQueueCount);
+            assertEquals(null, moderationAction);
+        }
+
+        void assertModerationActionQueuedOnce() {
+            assertEquals(1, moderationQueueCount);
+        }
+
+        void completeModerationSuccessfully() {
+            assertNotNull(moderationSuccess);
+            moderationSuccess.accept(null);
+        }
+
+        void failModeration(Throwable failure) {
+            assertNotNull(moderationFailure);
+            moderationFailure.accept(failure);
         }
 
         private MessageChannelUnion createChannel() {
@@ -371,7 +700,18 @@ class SlashCommandHandlerTest {
 
         private Member botMember() {
             return proxy(Member.class, (ignored, method, arguments) -> switch (method.getName()) {
-                case "hasAccess", "hasPermission" -> true;
+                case "hasAccess" -> true;
+                case "hasPermission" -> {
+                    if (arguments.length == 2 && arguments[0] instanceof GuildChannel) {
+                        yield true;
+                    }
+                    Permission[] permissions = (Permission[]) arguments[0];
+                    checkedBotPermission.set(permissions[0]);
+                    yield botHasModerationPermission;
+                }
+                case "canInteract" -> botCanInteract;
+                case "getId" -> "bot-id";
+                case "getIdLong" -> 6L;
                 default -> defaultValue(method.getReturnType());
             });
         }
@@ -440,9 +780,55 @@ class SlashCommandHandlerTest {
             });
         }
 
+        private AuditableRestAction<Void> moderationAction(
+                ModerationAction action,
+                UserSnowflake target
+        ) {
+            moderationAction = action;
+            moderationTarget = target;
+            return proxy(AuditableRestAction.class, (proxy, method, arguments) -> {
+                if (method.getName().equals("reason")) {
+                    recordedAuditReason.set(arguments[0].toString());
+                    return proxy;
+                }
+                if (method.getName().equals("queue") && method.getParameterCount() == 2) {
+                    moderationQueueCount++;
+                    @SuppressWarnings("unchecked")
+                    Consumer<Void> success = (Consumer<Void>) arguments[0];
+                    @SuppressWarnings("unchecked")
+                    Consumer<Throwable> failure = (Consumer<Throwable>) arguments[1];
+                    moderationSuccess = success;
+                    moderationFailure = failure;
+                    if (completeModerationAutomatically) {
+                        success.accept(null);
+                    }
+                    return null;
+                }
+                return fluentOrDefault(proxy, method.getReturnType());
+            });
+        }
+
         private static OptionMapping integerOption(String name, int value) {
             DataObject data = DataObject.empty()
                     .put("type", OptionType.INTEGER.getKey())
+                    .put("name", name)
+                    .put("value", value);
+            return new OptionMapping(data, new TLongObjectHashMap<>(), null, null);
+        }
+
+        private OptionMapping userOption() {
+            DataObject data = DataObject.empty()
+                    .put("type", OptionType.USER.getKey())
+                    .put("name", "user")
+                    .put("value", targetIdLong);
+            TLongObjectHashMap<Object> resolved = new TLongObjectHashMap<>();
+            resolved.put(targetIdLong, targetMemberResolved ? targetMember : targetUser);
+            return new OptionMapping(data, resolved, null, null);
+        }
+
+        private static OptionMapping stringOption(String name, String value) {
+            DataObject data = DataObject.empty()
+                    .put("type", OptionType.STRING.getKey())
                     .put("name", name)
                     .put("value", value);
             return new OptionMapping(data, new TLongObjectHashMap<>(), null, null);
