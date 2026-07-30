@@ -67,7 +67,7 @@ class SlashCommandHandlerTest {
 
         new SlashCommandHandler(repository).handle(interaction.event());
 
-        assertEquals(List.of("Pong! Бот на связи."), interaction.responses);
+        assertEquals(List.of("Pong! Бот у апппарата. Слушает батву"), interaction.responses);
         interaction.assertAcknowledgedOnceWithoutDeferral();
     }
 
@@ -79,7 +79,9 @@ class SlashCommandHandlerTest {
 
         assertTrue(interaction.onlyResponse().contains("/ping"));
         assertTrue(interaction.onlyResponse().contains("/last"));
-        assertTrue(interaction.onlyResponse().contains("Manage Messages"));
+        assertTrue(interaction.onlyResponse().contains("/deport чел [причина]"));
+        assertTrue(interaction.onlyResponse().contains("/magadan чел [причина]"));
+        assertTrue(interaction.onlyResponse().contains("/kpz чел срок [причина]"));
         interaction.assertAcknowledgedOnceWithoutDeferral();
     }
 
@@ -315,7 +317,7 @@ class SlashCommandHandlerTest {
 
     @Test
     void moderationRejectsDirectMessagesWithoutQueueingAnAction() {
-        InteractionFixture interaction = InteractionFixture.directMessageModeration("ban");
+        InteractionFixture interaction = InteractionFixture.directMessageModeration("deport");
 
         new SlashCommandHandler(repository()).handle(interaction.event());
 
@@ -326,7 +328,7 @@ class SlashCommandHandlerTest {
 
     @Test
     void moderationRequiresAdministratorWithoutQueueingAnAction() {
-        InteractionFixture interaction = InteractionFixture.moderation("ban");
+        InteractionFixture interaction = InteractionFixture.moderation("deport");
         interaction.administrator = false;
 
         new SlashCommandHandler(repository()).handle(interaction.event());
@@ -338,7 +340,7 @@ class SlashCommandHandlerTest {
 
     @Test
     void moderationRejectsTheCallerAsTargetWithoutQueueingAnAction() {
-        InteractionFixture interaction = InteractionFixture.moderation("ban");
+        InteractionFixture interaction = InteractionFixture.moderation("deport");
         interaction.targetId = "user-id";
         interaction.targetIdLong = 1L;
 
@@ -351,7 +353,7 @@ class SlashCommandHandlerTest {
 
     @Test
     void moderationRejectsTheGuildOwnerWithoutQueueingAnAction() {
-        InteractionFixture interaction = InteractionFixture.moderation("ban");
+        InteractionFixture interaction = InteractionFixture.moderation("deport");
         interaction.targetId = "owner-id";
         interaction.targetIdLong = 5L;
 
@@ -364,7 +366,7 @@ class SlashCommandHandlerTest {
 
     @Test
     void moderationRejectsTheBotAsTargetWithoutQueueingAnAction() {
-        InteractionFixture interaction = InteractionFixture.moderation("ban");
+        InteractionFixture interaction = InteractionFixture.moderation("deport");
         interaction.targetId = "bot-id";
         interaction.targetIdLong = 6L;
 
@@ -377,7 +379,7 @@ class SlashCommandHandlerTest {
 
     @Test
     void moderationRequiresCallerHierarchyWithoutQueueingAnAction() {
-        InteractionFixture interaction = InteractionFixture.moderation("kick");
+        InteractionFixture interaction = InteractionFixture.moderation("magadan");
         interaction.callerCanInteract = false;
 
         new SlashCommandHandler(repository()).handle(interaction.event());
@@ -392,7 +394,7 @@ class SlashCommandHandlerTest {
 
     @Test
     void moderationRequiresBotHierarchyWithoutQueueingAnAction() {
-        InteractionFixture interaction = InteractionFixture.moderation("kick");
+        InteractionFixture interaction = InteractionFixture.moderation("magadan");
         interaction.botCanInteract = false;
 
         new SlashCommandHandler(repository()).handle(interaction.event());
@@ -407,7 +409,7 @@ class SlashCommandHandlerTest {
 
     @Test
     void moderationRequiresTheCommandSpecificBotPermissionWithoutQueueingAnAction() {
-        InteractionFixture interaction = InteractionFixture.moderation("timeout");
+        InteractionFixture interaction = InteractionFixture.moderation("kpz");
         interaction.botHasModerationPermission = false;
 
         new SlashCommandHandler(repository()).handle(interaction.event());
@@ -420,7 +422,7 @@ class SlashCommandHandlerTest {
 
     @Test
     void moderationReportsAUserOptionWithoutAResolvedGuildMemberSafely() {
-        InteractionFixture interaction = InteractionFixture.moderation("kick");
+        InteractionFixture interaction = InteractionFixture.moderation("magadan");
         interaction.targetMemberResolved = false;
 
         new SlashCommandHandler(repository()).handle(interaction.event());
@@ -431,8 +433,8 @@ class SlashCommandHandlerTest {
     }
 
     @Test
-    void banUsesTheMentionedUserRequiredPermissionAndTrimmedAuditReason() {
-        InteractionFixture interaction = InteractionFixture.moderation("ban");
+    void deportUsesTheMentionedUserRequiredPermissionAndTrimmedAuditReason() {
+        InteractionFixture interaction = InteractionFixture.moderation("deport");
         interaction.reason = "  спам  ";
 
         new SlashCommandHandler(repository()).handle(interaction.event());
@@ -449,8 +451,8 @@ class SlashCommandHandlerTest {
     }
 
     @Test
-    void kickUsesTheMentionedMemberAndDefaultAuditReason() {
-        InteractionFixture interaction = InteractionFixture.moderation("kick");
+    void magadanUsesTheMentionedMemberAndDefaultAuditReason() {
+        InteractionFixture interaction = InteractionFixture.moderation("magadan");
         interaction.reason = "   ";
 
         new SlashCommandHandler(repository()).handle(interaction.event());
@@ -468,8 +470,8 @@ class SlashCommandHandlerTest {
     }
 
     @Test
-    void timeoutUsesTheMentionedMemberAndParsedDuration() {
-        InteractionFixture interaction = InteractionFixture.moderation("timeout");
+    void kpzUsesTheMentionedMemberAndParsedDuration() {
+        InteractionFixture interaction = InteractionFixture.moderation("kpz");
         interaction.duration = " 2H ";
         interaction.reason = "спам";
 
@@ -486,8 +488,8 @@ class SlashCommandHandlerTest {
     }
 
     @Test
-    void timeoutReturnsTheParserErrorWithoutQueueingAnAction() {
-        InteractionFixture interaction = InteractionFixture.moderation("timeout");
+    void kpzReturnsTheParserErrorWithoutQueueingAnAction() {
+        InteractionFixture interaction = InteractionFixture.moderation("kpz");
         interaction.duration = "forever";
 
         new SlashCommandHandler(repository()).handle(interaction.event());
@@ -502,7 +504,7 @@ class SlashCommandHandlerTest {
 
     @Test
     void moderationDefersImmediatelyAndEditsTheReplyOnlyAfterSuccess() {
-        InteractionFixture interaction = InteractionFixture.moderation("ban");
+        InteractionFixture interaction = InteractionFixture.moderation("deport");
         interaction.completeModerationAutomatically = false;
 
         new SlashCommandHandler(repository()).handle(interaction.event());
@@ -520,7 +522,7 @@ class SlashCommandHandlerTest {
 
     @Test
     void moderationDefersImmediatelyAndEditsASanitizedFailureReply() {
-        InteractionFixture interaction = InteractionFixture.moderation("timeout");
+        InteractionFixture interaction = InteractionFixture.moderation("kpz");
         interaction.completeModerationAutomatically = false;
 
         new SlashCommandHandler(repository()).handle(interaction.event());
@@ -733,18 +735,18 @@ class SlashCommandHandlerTest {
             }
             if (isModerationCommand()) {
                 options.add(userOption());
-                if (name.equals("timeout")) {
-                    options.add(stringOption("duration", duration));
+                if (name.equals("kpz")) {
+                    options.add(stringOption("срок", duration));
                 }
                 if (reason != null) {
-                    options.add(stringOption("reason", reason));
+                    options.add(stringOption("причина", reason));
                 }
             }
             return options;
         }
 
         private boolean isModerationCommand() {
-            return name.equals("ban") || name.equals("kick") || name.equals("timeout");
+            return name.equals("deport") || name.equals("magadan") || name.equals("kpz");
         }
 
         Message historyMessage(OffsetDateTime timeCreated) {
@@ -989,7 +991,7 @@ class SlashCommandHandlerTest {
         private OptionMapping userOption() {
             DataObject data = DataObject.empty()
                     .put("type", OptionType.USER.getKey())
-                    .put("name", "user")
+                    .put("name", "чел")
                     .put("value", targetIdLong);
             TLongObjectHashMap<Object> resolved = new TLongObjectHashMap<>();
             resolved.put(targetIdLong, targetMemberResolved ? targetMember : targetUser);
