@@ -47,6 +47,11 @@ public class SlashCommandHandler {
                     /last [count] - последние сообщения из этого канала
                     /зов - тегает всех и призывает БАТВУ на Faceit
                     /clear [count] - админская очистка последних сообщений
+                    /ban user [reason] - бан (требуется Administrator)
+                    /kick user [reason] - исключение (требуется Administrator)
+                    /timeout user duration [reason] - тайм-аут (требуется Administrator); duration: 30m, 2h или 7d
+
+                    Обычные команды с ! по-прежнему поддерживаются.
                     """);
             case "ping" -> reply(event, "Pong! Бот на связи.");
             case "stats" -> sendStats(event);
