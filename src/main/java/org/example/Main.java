@@ -6,6 +6,7 @@ import net.dv8tion.jda.api.requests.GatewayIntent;
 import org.example.bot.DailyMessageScheduler;
 import org.example.bot.MessageListener;
 import org.example.bot.ScheduledMessageConfig;
+import org.example.bot.SlashCommandDefinitions;
 import org.example.db.MessageRetentionConfig;
 import org.example.db.MessageRepository;
 
@@ -34,6 +35,13 @@ public class Main {
                     .addEventListeners(new MessageListener(repository))
                     .build()
                     .awaitReady();
+
+            jda.updateCommands()
+                    .addCommands(SlashCommandDefinitions.all())
+                    .queue(
+                            commands -> System.out.println("Registered " + commands.size() + " global slash commands."),
+                            failure -> System.err.println("Failed to register slash commands: " + failure.getMessage())
+                    );
 
             Supplier<String> dailyMessageSupplier = ScheduledMessageConfig::buildDailyMessageText;
 
