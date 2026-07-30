@@ -50,6 +50,17 @@ public class CommandHandler {
                     !last [n] - последние n сообщений из этого канала
                     !зов - тегает всех и пишет призывает БАТВУ на Faceit
                     !clear [n] / !очистить [n] - админская очистка последних сообщений
+
+                    Slash-команды (обычные !-команды по-прежнему работают):
+                    /help - показать список команд
+                    /ping - проверить, что бот отвечает
+                    /stats - статистика по сохраненным сообщениям
+                    /last [count] - последние сообщения из этого канала (требуется Manage Messages)
+                    /зов - тегает всех и призывает БАТВУ на Faceit
+                    /clear [count] - админская очистка последних сообщений
+                    /ban user [reason] - бан (требуется Administrator)
+                    /kick user [reason] - исключение (требуется Administrator)
+                    /timeout user duration [reason] - тайм-аут (требуется Administrator); duration: 30m, 2h или 7d
                     """);
             case "ping" -> sendMessage(channel, "Pong! Бот на связи.");
             case "stats" -> sendStats(message);
@@ -131,7 +142,7 @@ public class CommandHandler {
                 builder.append(line);
             }
 
-            sendMessage(message.getChannel(), builder.toString());
+            sendArchiveMessage(message.getChannel(), builder.toString());
         } catch (RuntimeException failure) {
             System.err.println("Failed to read message archive: " + failure.getMessage());
             sendMessage(message.getChannel(), "Не получилось прочитать архив сообщений.");
@@ -297,6 +308,17 @@ public class CommandHandler {
                 null,
                 failure -> System.err.println("Failed to send Discord message: " + failure.getMessage())
         );
+    }
+
+    private static void sendArchiveMessage(MessageChannel channel, String content) {
+        channel.sendMessage(content)
+                .setAllowedMentions(List.of())
+                .queue(
+                        null,
+                        failure -> System.err.println(
+                                "Failed to send Discord message: " + failure.getMessage()
+                        )
+                );
     }
 
     static void observePurgeFailures(List<CompletableFuture<Void>> purgeOperations) {

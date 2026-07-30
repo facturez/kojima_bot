@@ -3,16 +3,19 @@ package org.example.bot;
 import net.dv8tion.jda.api.events.message.MessageBulkDeleteEvent;
 import net.dv8tion.jda.api.events.message.MessageDeleteEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
+import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import org.example.db.MessageRepository;
 
 public class MessageListener extends ListenerAdapter {
     private final MessageRepository repository;
     private final CommandHandler commandHandler;
+    private final SlashCommandHandler slashCommandHandler;
 
     public MessageListener(MessageRepository repository) {
         this.repository = repository;
         this.commandHandler = new CommandHandler(repository);
+        this.slashCommandHandler = new SlashCommandHandler(repository);
     }
 
     @Override
@@ -23,6 +26,11 @@ public class MessageListener extends ListenerAdapter {
 
         repository.saveMessage(event.getMessage());
         commandHandler.handle(event.getMessage());
+    }
+
+    @Override
+    public void onSlashCommandInteraction(SlashCommandInteractionEvent event) {
+        slashCommandHandler.handle(event);
     }
 
     @Override
