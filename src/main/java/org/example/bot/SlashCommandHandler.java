@@ -44,7 +44,7 @@ public class SlashCommandHandler {
                     /help - показать список команд
                     /ping - проверить, что бот отвечает
                     /stats - статистика по сохраненным сообщениям
-                    /last [count] - последние сообщения из этого канала
+                    /last [count] - последние сообщения из этого канала (требуется Manage Messages)
                     /зов - тегает всех и призывает БАТВУ на Faceit
                     /clear [count] - админская очистка последних сообщений
                     /ban user [reason] - бан (требуется Administrator)
@@ -224,7 +224,7 @@ public class SlashCommandHandler {
                     builder.append(line);
                 }
 
-                editOriginal(hook, builder.toString());
+                editArchiveOriginal(hook, builder.toString());
             } catch (RuntimeException failure) {
                 System.err.println("Failed to read message archive: " + failure.getMessage());
                 editOriginal(hook, "Не получилось прочитать архив сообщений.");
@@ -278,16 +278,44 @@ public class SlashCommandHandler {
             return;
         }
 
+        Member bot = event.getGuild().getSelfMember();
+        if (!bot.hasPermission(
+                textChannel,
+                Permission.MESSAGE_HISTORY,
+                Permission.MESSAGE_MANAGE
+        )) {
+            reply(
+                    event,
+                    "У бота нет прав для чтения истории и управления сообщениями в этом канале."
+            );
+            return;
+        }
+
         int requestedAmount = amountToDelete;
-        event.deferReply().queue(
+        event.deferReply(true).queue(
                 hook -> retrieveAndDeleteMessages(textChannel, requestedAmount, hook),
                 SlashCommandHandler::logReplyFailure
         );
     }
 
     private void retrieveAndDeleteMessages(TextChannel textChannel, int amountToDelete, InteractionHook hook) {
-        OffsetDateTime twoWeeksAgo = OffsetDateTime.now().minusWeeks(2);
-        textChannel.getHistory().retrievePast(amountToDelete).queue(messages -> {
+        try {
+            textChannel.getHistory().retrievePast(amountToDelete).queue(
+                    messages -> deleteRetrievedMessages(textChannel, messages, hook),
+                    failure -> reportDeletionFailure(hook, failure)
+            );
+        } catch (RuntimeException failure) {
+            reportDeletionFailure(hook, failure);
+        }
+    }
+
+    private void deleteRetrievedMessages(
+            TextChannel textChannel,
+            List<Message> messages,
+            InteractionHook hook
+    ) {
+        try {
+            OffsetDateTime twoWeeksAgo = OffsetDateTime.now().minusWeeks(2);
             List<Message> recentMessages = new ArrayList<>();
             int skippedOldMessages = 0;
 
@@ -322,10 +350,9 @@ public class SlashCommandHandler {
                             reportDeletionFailure(hook, failure);
                         }
                     });
-        }, failure -> editOriginal(
-                hook,
-                "Не получилось очистить сообщения: " + failure.getMessage()
-        ));
+        } catch (RuntimeException failure) {
+            reportDeletionFailure(hook, failure);
+        }
     }
 
     private void reportDeletionSuccess(InteractionHook hook, int deletedMessages, int skippedOldMessages) {
@@ -409,6 +436,17 @@ public class SlashCommandHandler {
                         "Failed to finish deferred slash command: " + failure.getMessage()
                 )
         );
+    }
+
+    private static void editArchiveOriginal(InteractionHook hook, String content) {
+        hook.editOriginal(content)
+                .setAllowedMentions(List.of())
+                .queue(
+                        null,
+                        failure -> System.err.println(
+                                "Failed to finish deferred slash command: " + failure.getMessage()
+                        )
+                );
     }
 
     private static void logReplyFailure(Throwable failure) {

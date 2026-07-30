@@ -35,6 +35,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -43,6 +44,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -77,6 +79,7 @@ class SlashCommandHandlerTest {
 
         assertTrue(interaction.onlyResponse().contains("/ping"));
         assertTrue(interaction.onlyResponse().contains("/last"));
+        assertTrue(interaction.onlyResponse().contains("Manage Messages"));
         interaction.assertAcknowledgedOnceWithoutDeferral();
     }
 
@@ -120,6 +123,28 @@ class SlashCommandHandlerTest {
         assertEquals(5, repository.recentLimit);
         assertTrue(interaction.onlyResponse().contains("archived text"));
         interaction.assertAcknowledgedOnceWithDeferral();
+    }
+
+    @Test
+    void lastDisablesEveryAllowedMentionWhenReplayingArchivedText() {
+        RecordingRepository repository = repository();
+        repository.recentMessages = List.of(
+                new StoredMessage(
+                        "reader",
+                        "@everyone <@123456789012345678> <@&987654321098765432>",
+                        Instant.parse("2026-07-30T10:15:30Z")
+                )
+        );
+        InteractionFixture interaction = InteractionFixture.guild("last");
+        interaction.manageMessages = true;
+
+        new SlashCommandHandler(repository).handle(interaction.event());
+
+        assertTrue(interaction.onlyResponse().contains(
+                "@everyone <@123456789012345678> <@&987654321098765432>"
+        ));
+        assertNotNull(interaction.editedAllowedMentions);
+        assertEquals(List.of(), interaction.editedAllowedMentions);
     }
 
     @Test
@@ -175,6 +200,27 @@ class SlashCommandHandlerTest {
     }
 
     @Test
+    void clearRequiresBothBotPermissionsInTheCurrentChannel() {
+        InteractionFixture interaction = InteractionFixture.guild("clear");
+        interaction.administrator = true;
+        interaction.botHasClearPermissions = false;
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertSame(interaction.channel, interaction.clearPermissionChannel.get());
+        assertEquals(
+                List.of(Permission.MESSAGE_HISTORY, Permission.MESSAGE_MANAGE),
+                interaction.checkedClearPermissions
+        );
+        assertEquals(0, interaction.retrievePastAmount);
+        assertEquals(
+                "У бота нет прав для чтения истории и управления сообщениями в этом канале.",
+                interaction.onlyResponse()
+        );
+        interaction.assertAcknowledgedOnceWithoutDeferral();
+    }
+
+    @Test
     void clearUsesTheDefaultCountAndDefersBeforeHistoryRetrieval() {
         InteractionFixture interaction = InteractionFixture.guild("clear");
         interaction.administrator = true;
@@ -183,6 +229,22 @@ class SlashCommandHandlerTest {
 
         assertEquals(10, interaction.retrievePastAmount);
         assertTrue(interaction.onlyResponse().contains("моложе 14 дней"));
+        interaction.assertAcknowledgedOnceWithDeferral();
+    }
+
+    @Test
+    void clearOneDefersEphemerallyAndDeletesOnePreExistingMessage() {
+        InteractionFixture interaction = InteractionFixture.guild("clear", 1);
+        interaction.administrator = true;
+        Message existingMessage = interaction.historyMessage(OffsetDateTime.now().minusMinutes(1));
+        interaction.historyMessages = List.of(existingMessage);
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        assertTrue(interaction.ephemeralDeferral);
+        assertEquals(1, interaction.retrievePastAmount);
+        assertEquals(List.of(existingMessage), interaction.deletedMessages);
+        assertEquals("Удалил 1 сообщений.", interaction.onlyResponse());
         interaction.assertAcknowledgedOnceWithDeferral();
     }
 
@@ -201,6 +263,53 @@ class SlashCommandHandlerTest {
         assertEquals(List.of(recentFirst, recentSecond), interaction.purgedMessages);
         assertTrue(interaction.onlyResponse().contains("Удалил 2 сообщений"));
         assertTrue(interaction.onlyResponse().contains("1 старых сообщений"));
+        interaction.assertAcknowledgedOnceWithDeferral();
+    }
+
+    @Test
+    void clearFinishesDeferredReplyWhenHistoryRetrievalThrowsSynchronously() {
+        InteractionFixture interaction = InteractionFixture.guild("clear");
+        interaction.administrator = true;
+        interaction.synchronousHistoryFailure =
+                new IllegalStateException("history permission cache detail");
+
+        assertDoesNotThrow(() -> new SlashCommandHandler(repository()).handle(interaction.event()));
+
+        assertEquals("Не получилось очистить сообщения.", interaction.onlyResponse());
+        assertFalse(interaction.onlyResponse().contains("permission cache detail"));
+        interaction.assertAcknowledgedOnceWithDeferral();
+    }
+
+    @Test
+    void clearSanitizesAsynchronousHistoryFailure() {
+        InteractionFixture interaction = InteractionFixture.guild("clear");
+        interaction.administrator = true;
+        interaction.historyFailure = new IllegalStateException("Discord response body detail");
+
+        new SlashCommandHandler(repository()).handle(interaction.event());
+
+        String response = interaction.onlyResponse();
+        assertEquals("Не получилось очистить сообщения.", response);
+        assertFalse(response.contains("Discord response body detail"));
+        interaction.assertAcknowledgedOnceWithDeferral();
+    }
+
+    @Test
+    void clearFinishesDeferredReplyWhenBulkPurgeThrowsSynchronously() {
+        InteractionFixture interaction = InteractionFixture.guild("clear", 2);
+        interaction.administrator = true;
+        interaction.historyMessages = List.of(
+                interaction.historyMessage(OffsetDateTime.now().minusMinutes(1)),
+                interaction.historyMessage(OffsetDateTime.now().minusMinutes(2))
+        );
+        interaction.synchronousPurgeFailure =
+                new IllegalStateException("bulk delete validation detail");
+
+        assertDoesNotThrow(() -> new SlashCommandHandler(repository()).handle(interaction.event()));
+
+        String response = interaction.onlyResponse();
+        assertEquals("Не получилось очистить сообщения.", response);
+        assertFalse(response.contains("bulk delete validation detail"));
         interaction.assertAcknowledgedOnceWithDeferral();
     }
 
@@ -471,6 +580,7 @@ class SlashCommandHandlerTest {
         private final AtomicInteger acknowledgements = new AtomicInteger();
         private final AtomicInteger deferrals = new AtomicInteger();
         private final AtomicReference<GuildChannel> permissionChannel = new AtomicReference<>();
+        private final AtomicReference<GuildChannel> clearPermissionChannel = new AtomicReference<>();
         private final AtomicReference<Permission> checkedBotPermission = new AtomicReference<>();
         private final AtomicReference<String> recordedAuditReason = new AtomicReference<>();
         private final AtomicReference<Duration> recordedTimeoutDuration = new AtomicReference<>();
@@ -488,8 +598,10 @@ class SlashCommandHandlerTest {
         private boolean callerCanInteract = true;
         private boolean botCanInteract = true;
         private boolean botHasModerationPermission = true;
+        private boolean botHasClearPermissions = true;
         private boolean targetMemberResolved = true;
         private boolean completeModerationAutomatically = true;
+        private boolean ephemeralDeferral;
         private String targetId = "target-id";
         private long targetIdLong = 99L;
         private String reason;
@@ -505,6 +617,12 @@ class SlashCommandHandlerTest {
         private Consumer<Throwable> moderationFailure;
         private List<Message> historyMessages = List.of();
         private List<Message> purgedMessages = List.of();
+        private final List<Message> deletedMessages = new ArrayList<>();
+        private List<Permission> checkedClearPermissions = List.of();
+        private List<Message.MentionType> editedAllowedMentions;
+        private RuntimeException synchronousHistoryFailure;
+        private RuntimeException synchronousPurgeFailure;
+        private Throwable historyFailure;
 
         private InteractionFixture(String name, Integer count, boolean fromGuild) {
             this.name = name;
@@ -630,9 +748,12 @@ class SlashCommandHandlerTest {
         }
 
         Message historyMessage(OffsetDateTime timeCreated) {
-            return proxy(Message.class, (ignored, method, arguments) -> switch (method.getName()) {
+            return proxy(Message.class, (message, method, arguments) -> switch (method.getName()) {
                 case "getTimeCreated" -> timeCreated;
-                case "delete" -> queuedAction(AuditableRestAction.class, null);
+                case "delete" -> {
+                    deletedMessages.add((Message) message);
+                    yield queuedAction(AuditableRestAction.class, null);
+                }
                 default -> defaultValue(method.getReturnType());
             });
         }
@@ -686,6 +807,9 @@ class SlashCommandHandlerTest {
                         case "asTextChannel" -> proxy;
                         case "getHistory" -> history((TextChannel) proxy);
                         case "purgeMessages" -> {
+                            if (synchronousPurgeFailure != null) {
+                                throw synchronousPurgeFailure;
+                            }
                             @SuppressWarnings("unchecked")
                             List<Message> messages = (List<Message>) arguments[0];
                             purgedMessages = List.copyOf(messages);
@@ -701,9 +825,28 @@ class SlashCommandHandlerTest {
                 @Override
                 public RestAction<List<Message>> retrievePast(int amount) {
                     retrievePastAmount = amount;
-                    return queuedAction(RestAction.class, historyMessages);
+                    if (synchronousHistoryFailure != null) {
+                        throw synchronousHistoryFailure;
+                    }
+                    return historyAction();
                 }
             };
+        }
+
+        private RestAction<List<Message>> historyAction() {
+            return proxy(RestAction.class, (proxy, method, arguments) -> {
+                if (method.getName().equals("queue") && method.getParameterCount() == 2) {
+                    if (historyFailure == null) {
+                        invokeSuccess(arguments[0], historyMessages);
+                    } else if (arguments[1] != null) {
+                        @SuppressWarnings("unchecked")
+                        Consumer<Throwable> failure = (Consumer<Throwable>) arguments[1];
+                        failure.accept(historyFailure);
+                    }
+                    return null;
+                }
+                return fluentOrDefault(proxy, method.getReturnType());
+            });
         }
 
         private Member botMember() {
@@ -711,7 +854,14 @@ class SlashCommandHandlerTest {
                 case "hasAccess" -> true;
                 case "hasPermission" -> {
                     if (arguments.length == 2 && arguments[0] instanceof GuildChannel) {
-                        yield true;
+                        Permission[] permissions = (Permission[]) arguments[1];
+                        if (permissions.length == 1
+                                && permissions[0] == Permission.MESSAGE_HISTORY) {
+                            yield true;
+                        }
+                        clearPermissionChannel.set((GuildChannel) arguments[0]);
+                        checkedClearPermissions = List.of(permissions);
+                        yield botHasClearPermissions;
                     }
                     Permission[] permissions = (Permission[]) arguments[0];
                     checkedBotPermission.set(permissions[0]);
@@ -747,6 +897,10 @@ class SlashCommandHandlerTest {
                     replyContent.set(arguments[0].toString());
                     return proxy;
                 }
+                if (method.getName().equals("setEphemeral")) {
+                    ephemeralDeferral = (boolean) arguments[0];
+                    return proxy;
+                }
                 if (method.getName().equals("queue") && method.getParameterCount() == 2) {
                     acknowledgements.incrementAndGet();
                     if (replyContent.get() == null) {
@@ -775,6 +929,13 @@ class SlashCommandHandlerTest {
 
         private <T> T queuedAction(Class<T> actionType, Object resultOrContent) {
             return proxy(actionType, (proxy, method, arguments) -> {
+                if (method.getName().equals("setAllowedMentions")) {
+                    @SuppressWarnings("unchecked")
+                    Collection<Message.MentionType> mentions =
+                            (Collection<Message.MentionType>) arguments[0];
+                    editedAllowedMentions = List.copyOf(mentions);
+                    return proxy;
+                }
                 if (method.getName().equals("queue")) {
                     if (resultOrContent instanceof String content) {
                         responses.add(content);
