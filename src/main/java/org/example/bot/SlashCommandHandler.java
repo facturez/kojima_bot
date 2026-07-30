@@ -33,7 +33,7 @@ public class SlashCommandHandler {
 
     private final MessageRepository repository;
 
-    public SlashCommandHandler(MessageRepository repository) {
+    public SlashCommandHandler(MessageRepository repository) {n
         this.repository = repository;
     }
 
@@ -44,12 +44,12 @@ public class SlashCommandHandler {
                     /help - показать список команд
                     /ping - проверить, что бот отвечает
                     /stats - статистика по сохраненным сообщениям
-                    /last [count] - последние сообщения из этого канала (требуется Manage Messages)
+                    /last [n] - последние сообщения из этого канала
                     /зов - тегает всех и призывает БАТВУ на Faceit
-                    /clear [count] - админская очистка последних сообщений
-                    /ban user [reason] - бан (требуется Administrator)
-                    /kick user [reason] - исключение (требуется Administrator)
-                    /timeout user duration [reason] - тайм-аут (требуется Administrator); duration: 30m, 2h или 7d
+                    /clear [n] - админская очистка последних сообщений
+                    /deport user [причина] - депортация из Кодзимы(бан)
+                    /magadan user [причина] - этап в магадан(кик)
+                    /kpz user duration [reason] - заключение в петушатник(тайм-аут)
 
                     Обычные команды с ! по-прежнему поддерживаются.
                     """);
