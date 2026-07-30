@@ -18,7 +18,7 @@ class SlashCommandDefinitionsTest {
         List<CommandData> definitions = SlashCommandDefinitions.all();
 
         assertEquals(
-                Set.of("help", "ping", "stats", "last", "зов", "clear", "ban", "kick", "timeout"),
+                Set.of("help", "ping", "stats", "last", "зов", "clear", "deport", "magadan", "kpz"),
                 definitions.stream().map(CommandData::getName).collect(java.util.stream.Collectors.toSet())
         );
         assertEquals(9, definitions.size());
@@ -29,13 +29,13 @@ class SlashCommandDefinitionsTest {
     void definesAllOptionsWithTheirRequirednessAndBounds() {
         assertOption(command("last"), "count", OptionType.INTEGER, false);
         assertOption(command("clear"), "count", OptionType.INTEGER, false);
-        assertOption(command("ban"), "user", OptionType.USER, true);
-        assertOption(command("ban"), "reason", OptionType.STRING, false);
-        assertOption(command("kick"), "user", OptionType.USER, true);
-        assertOption(command("kick"), "reason", OptionType.STRING, false);
-        assertOption(command("timeout"), "user", OptionType.USER, true);
-        assertOption(command("timeout"), "duration", OptionType.STRING, true);
-        assertOption(command("timeout"), "reason", OptionType.STRING, false);
+        assertOption(command("deport"), "чел", OptionType.USER, true);
+        assertOption(command("deport"), "причина", OptionType.STRING, false);
+        assertOption(command("magadan"), "чел", OptionType.USER, true);
+        assertOption(command("magadan"), "причина", OptionType.STRING, false);
+        assertOption(command("kpz"), "чел", OptionType.USER, true);
+        assertOption(command("kpz"), "срок", OptionType.STRING, true);
+        assertOption(command("kpz"), "причина", OptionType.STRING, false);
 
         assertRange(command("last"), "count", 1, 20);
         assertRange(command("clear"), "count", 1, 100);

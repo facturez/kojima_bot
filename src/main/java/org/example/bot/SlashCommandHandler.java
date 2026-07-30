@@ -47,9 +47,9 @@ public class SlashCommandHandler {
                     /last [n] - последние сообщения из этого канала
                     /зов - тегает всех и призывает БАТВУ на Faceit
                     /clear [n] - админская очистка последних сообщений
-                    /deport user [причина] - депортация из Кодзимы(бан)
-                    /magadan user [причина] - этап в магадан(кик)
-                    /kpz user duration [reason] - заключение в обезьянник(тайм-аут)
+                    /deport чел [причина] - депортация из Кодзимы(бан)
+                    /magadan чел [причина] - этап в магадан(кик)
+                    /kpz чел срок [причина] - заключение в обезьянник(тайм-аут)
 
                     Обычные команды с ! по-прежнему поддерживаются.
                     """);
@@ -58,20 +58,22 @@ public class SlashCommandHandler {
             case "last" -> sendRecentMessages(event);
             case "зов" -> callEveryone(event);
             case "clear" -> clearMessages(event);
-            case "ban", "kick", "timeout" -> moderateMember(event);
+            case SlashCommandContract.DEPORT,
+                 SlashCommandContract.MAGADAN,
+                 SlashCommandContract.KPZ -> moderateMember(event);
             default -> reply(event, "Неизвестная команда. Используй /help");
         }
     }
 
     private void moderateMember(SlashCommandInteractionEvent event) {
         Permission required = switch (event.getName()) {
-            case "ban" -> Permission.BAN_MEMBERS;
-            case "kick" -> Permission.KICK_MEMBERS;
-            case "timeout" -> Permission.MODERATE_MEMBERS;
+            case SlashCommandContract.DEPORT -> Permission.BAN_MEMBERS;
+            case SlashCommandContract.MAGADAN -> Permission.KICK_MEMBERS;
+            case SlashCommandContract.KPZ -> Permission.MODERATE_MEMBERS;
             default -> throw new IllegalArgumentException("Unknown moderation command");
         };
 
-        OptionMapping userOption = event.getOption("user");
+        OptionMapping userOption = event.getOption(SlashCommandContract.TARGET_OPTION);
         User targetUser = userOption == null ? null : userOption.getAsUser();
         Member target = userOption == null ? null : userOption.getAsMember();
         boolean fromGuild = event.isFromGuild();
@@ -101,10 +103,10 @@ public class SlashCommandHandler {
         }
 
         Duration timeoutDuration = null;
-        if (event.getName().equals("timeout")) {
+        if (event.getName().equals(SlashCommandContract.KPZ)) {
             try {
                 timeoutDuration = TimeoutDurationParser.parse(
-                        event.getOption("duration", OptionMapping::getAsString)
+                        event.getOption(SlashCommandContract.DURATION_OPTION, OptionMapping::getAsString)
                 );
             } catch (IllegalArgumentException invalidDuration) {
                 reply(event, invalidDuration.getMessage());
@@ -112,22 +114,26 @@ public class SlashCommandHandler {
             }
         }
 
-        String suppliedReason = event.getOption("reason", "", OptionMapping::getAsString);
+        String suppliedReason = event.getOption(
+                SlashCommandContract.REASON_OPTION,
+                "",
+                OptionMapping::getAsString
+        );
         String auditReason = suppliedReason == null || suppliedReason.isBlank()
                 ? DEFAULT_AUDIT_REASON
                 : suppliedReason.trim();
         AuditableRestAction<Void> action;
         String confirmation;
         switch (event.getName()) {
-            case "ban" -> {
+            case SlashCommandContract.DEPORT -> {
                 action = guild.ban(targetUser, 0, TimeUnit.DAYS);
                 confirmation = "Забанил " + target.getAsMention() + ".";
             }
-            case "kick" -> {
+            case SlashCommandContract.MAGADAN -> {
                 action = target.kick();
                 confirmation = "Исключил " + target.getAsMention() + " с сервера.";
             }
-            case "timeout" -> {
+            case SlashCommandContract.KPZ -> {
                 action = target.timeoutFor(timeoutDuration);
                 confirmation = "Выдал тайм-аут " + target.getAsMention() + ".";
             }

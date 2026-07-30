@@ -31,26 +31,56 @@ public final class SlashCommandDefinitions {
                                 "Количество сообщений от 1 до 100",
                                 false
                         ).setRequiredRange(1, 100)),
-                Commands.slash("deport", "Депортация из Кодзимы(бан)")
+                Commands.slash(SlashCommandContract.DEPORT, "Депортация из Кодзимы(бан)")
                         .addOptions(
-                                new OptionData(OptionType.USER, "чел", "Участник для депортации", true),
-                                new OptionData(OptionType.STRING, "причина", "Причина депортации", false)
-                        ),
-                Commands.slash("magadan", "Этап в магадан(кик)")
-                        .addOptions(
-                                new OptionData(OptionType.USER, "чел", "Участник для этапирования", true),
-                                new OptionData(OptionType.STRING, "причина", "Причина этапировния", false)
-                        ),
-                Commands.slash("kpz", "Заключение в обезьянник(тайм-аут)")
-                        .addOptions(
-                                new OptionData(OptionType.USER, "чел", "Участник для заключения в обезьянник", true),
+                                new OptionData(
+                                        OptionType.USER,
+                                        SlashCommandContract.TARGET_OPTION,
+                                        "Участник для депортации",
+                                        true
+                                ),
                                 new OptionData(
                                         OptionType.STRING,
-                                        "duration",
+                                        SlashCommandContract.REASON_OPTION,
+                                        "Причина депортации",
+                                        false
+                                )
+                        ),
+                Commands.slash(SlashCommandContract.MAGADAN, "Этап в магадан(кик)")
+                        .addOptions(
+                                new OptionData(
+                                        OptionType.USER,
+                                        SlashCommandContract.TARGET_OPTION,
+                                        "Участник для этапирования",
+                                        true
+                                ),
+                                new OptionData(
+                                        OptionType.STRING,
+                                        SlashCommandContract.REASON_OPTION,
+                                        "Причина этапировния",
+                                        false
+                                )
+                        ),
+                Commands.slash(SlashCommandContract.KPZ, "Заключение в обезьянник(тайм-аут)")
+                        .addOptions(
+                                new OptionData(
+                                        OptionType.USER,
+                                        SlashCommandContract.TARGET_OPTION,
+                                        "Участник для заключения в обезьянник",
+                                        true
+                                ),
+                                new OptionData(
+                                        OptionType.STRING,
+                                        SlashCommandContract.DURATION_OPTION,
                                         "Длительность: 30m, 2h или 7d",
                                         true
                                 ),
-                                new OptionData(OptionType.STRING, "причина", "Причина заключения", false)
+                                new OptionData(
+                                        OptionType.STRING,
+                                        SlashCommandContract.REASON_OPTION,
+                                        "Причина заключения",
+                                        false
+                                )
                         )
         );
     }

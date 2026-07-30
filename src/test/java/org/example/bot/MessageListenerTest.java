@@ -59,7 +59,7 @@ class MessageListenerTest {
                 new MessageRepository(temporaryDirectory.resolve("archive.db").toString())
         ).onSlashCommandInteraction(event);
 
-        assertEquals("Pong! Бот на связи.", reply.get());
+        assertEquals("Pong! Бот у апппарата. Слушает батву", reply.get());
         assertEquals(1, acknowledgements.get());
     }
 
