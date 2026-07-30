@@ -79,9 +79,9 @@ class SlashCommandHandlerTest {
 
         assertTrue(interaction.onlyResponse().contains("/ping"));
         assertTrue(interaction.onlyResponse().contains("/last"));
-        assertTrue(interaction.onlyResponse().contains("/deport чел [причина]"));
-        assertTrue(interaction.onlyResponse().contains("/magadan чел [причина]"));
-        assertTrue(interaction.onlyResponse().contains("/kpz чел срок [причина]"));
+        assertTrue(interaction.onlyResponse().contains("/deport [чел] [причина]"));
+        assertTrue(interaction.onlyResponse().contains("/magadan [чел] [причина]"));
+        assertTrue(interaction.onlyResponse().contains("/kpz [чел] [срок] [причина]"));
         interaction.assertAcknowledgedOnceWithoutDeferral();
     }
 
