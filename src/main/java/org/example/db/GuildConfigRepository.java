@@ -177,7 +177,8 @@ public class GuildConfigRepository {
             connection.setAutoCommit(false);
             try {
                 if (exists(connection, "SELECT 1 FROM migration_markers WHERE marker=?", marker)) {
-                    connection.rollback();
+                    backfillLegacyDailyState(connection, guildId);
+                    connection.commit();
                     return false;
                 }
                 String now = Instant.now().toString();
@@ -202,6 +203,7 @@ public class GuildConfigRepository {
                         ON CONFLICT(guild_id) DO UPDATE SET enabled=excluded.enabled,message_text=excluded.message_text,
                         repeat_count=excluded.repeat_count
                         """, guildId, callEnabled, legacy.callMessage(), legacy.callRepeatCount());
+                backfillLegacyDailyState(connection, guildId);
                 for (String role : legacy.allowedRoleIds())
                     execute(connection, "INSERT OR IGNORE INTO call_allowed_roles(guild_id,role_id) VALUES(?,?)", guildId, role);
                 execute(connection, "INSERT INTO migration_markers(marker,completed_at) VALUES(?,?)", marker, now);
@@ -214,6 +216,21 @@ public class GuildConfigRepository {
         } catch (SQLException failure) {
             throw databaseFailure("bootstrap legacy guild", failure);
         }
+    }
+
+    private void backfillLegacyDailyState(Connection connection, String guildId) throws SQLException {
+        String marker = "legacy-daily-state-v1:" + guildId;
+        if (exists(connection, "SELECT 1 FROM migration_markers WHERE marker=?", marker)
+                || !exists(connection, "SELECT 1 FROM scheduler_state WHERE key='daily_message_last_sent_date'")) {
+            return;
+        }
+        execute(connection, """
+                INSERT INTO daily_message_state(guild_id,last_sent_date)
+                SELECT ?,value FROM scheduler_state WHERE key='daily_message_last_sent_date'
+                ON CONFLICT(guild_id) DO NOTHING
+                """, guildId);
+        execute(connection, "INSERT INTO migration_markers(marker,completed_at) VALUES(?,?)",
+                marker, Instant.now().toString());
     }
 
     private DailyMessageSettings readDaily(ResultSet result) throws SQLException {

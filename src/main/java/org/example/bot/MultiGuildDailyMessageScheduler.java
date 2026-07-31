@@ -26,6 +26,7 @@ public final class MultiGuildDailyMessageScheduler {
     private final Clock clock;
     private final ScheduledExecutorService executor;
     private final Map<String, ScheduledFuture<?>> jobs = new ConcurrentHashMap<>();
+    private final Map<String, Long> generations = new ConcurrentHashMap<>();
     private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
 
     public MultiGuildDailyMessageScheduler(JDA jda, GuildConfigRepository configs) {
@@ -46,18 +47,20 @@ public final class MultiGuildDailyMessageScheduler {
 
     public synchronized void refreshGuild(String guildId) {
         removeGuild(guildId);
+        long generation = generations.get(guildId);
         configs.findGuild(guildId).filter(config -> config.active() && config.daily().enabled())
                 .ifPresent(config -> {
                     DailyMessageSettings settings = config.daily();
                     LocalDate today = ZonedDateTime.now(clock).withZoneSameInstant(settings.timezone()).toLocalDate();
                     if (configs.getLastDailyMessageDate(guildId).filter(today::equals).isEmpty()) {
-                        send(settings, today, 0);
+                        send(settings, today, 0, generation);
                     }
-                    scheduleNext(settings);
+                    scheduleNext(settings, generation);
                 });
     }
 
     public synchronized void removeGuild(String guildId) {
+        generations.merge(guildId, 1L, Long::sum);
         ScheduledFuture<?> old = jobs.remove(guildId);
         if (old != null) old.cancel(false);
     }
@@ -67,14 +70,15 @@ public final class MultiGuildDailyMessageScheduler {
         executor.shutdownNow();
     }
 
-    private void scheduleNext(DailyMessageSettings settings) {
+    private synchronized void scheduleNext(DailyMessageSettings settings, long generation) {
+        if (generations.getOrDefault(settings.guildId(), 0L) != generation) return;
         ZonedDateTime now = ZonedDateTime.now(clock).withZoneSameInstant(settings.timezone());
         ZonedDateTime next = nextRunAfter(now, settings.timezone());
         long delay = Math.max(0, Duration.between(now, next).toMillis());
         jobs.put(settings.guildId(), executor.schedule(() -> {
             LocalDate date = ZonedDateTime.now(clock).withZoneSameInstant(settings.timezone()).toLocalDate();
-            send(settings, date, 0);
-            refreshGuild(settings.guildId());
+            send(settings, date, 0, generation);
+            scheduleNext(settings, generation);
         }, delay, TimeUnit.MILLISECONDS));
     }
 
@@ -83,13 +87,20 @@ public final class MultiGuildDailyMessageScheduler {
         return local.toLocalDate().plusDays(1).atStartOfDay(zone);
     }
 
-    private void send(DailyMessageSettings settings, LocalDate date, int retry) {
+    private synchronized void send(DailyMessageSettings settings, LocalDate date, int retry, long generation) {
+        if (generations.getOrDefault(settings.guildId(), 0L) != generation) return;
+        boolean settingsAreCurrent = configs.findGuild(settings.guildId())
+                .filter(config -> config.active() && config.daily().enabled())
+                .map(config -> config.daily().equals(settings))
+                .orElse(false);
+        if (!settingsAreCurrent) return;
         if (configs.getLastDailyMessageDate(settings.guildId()).filter(date::equals).isPresent()) return;
         if (!inFlight.add(settings.guildId())) return;
         TextChannel channel = settings.channelId() == null ? null : jda.getTextChannelById(settings.channelId());
         if (channel == null || !channel.getGuild().getId().equals(settings.guildId())) {
             inFlight.remove(settings.guildId());
-            retry(settings, date, retry, new IllegalStateException("Configured channel is unavailable or belongs to another guild"));
+            retry(settings, date, retry, generation,
+                    new IllegalStateException("Configured channel is unavailable or belongs to another guild"));
             return;
         }
         long day = settings.baseDayNumber() + ChronoUnit.DAYS.between(settings.baseDate(), date);
@@ -98,15 +109,15 @@ public final class MultiGuildDailyMessageScheduler {
             inFlight.remove(settings.guildId());
         }, failure -> {
             inFlight.remove(settings.guildId());
-            retry(settings, date, retry, failure);
+            retry(settings, date, retry, generation, failure);
         });
     }
 
-    private void retry(DailyMessageSettings settings, LocalDate date, int retry, Throwable failure) {
+    private void retry(DailyMessageSettings settings, LocalDate date, int retry, long generation, Throwable failure) {
         if (retry >= RETRIES.length) {
             System.err.println("Daily message failed for guild " + settings.guildId() + ": " + failure.getMessage());
             return;
         }
-        executor.schedule(() -> send(settings, date, retry + 1), RETRIES[retry], TimeUnit.MINUTES);
+        executor.schedule(() -> send(settings, date, retry + 1, generation), RETRIES[retry], TimeUnit.MINUTES);
     }
 }
