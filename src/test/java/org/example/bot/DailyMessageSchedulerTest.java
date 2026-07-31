@@ -1,9 +1,12 @@
 package org.example.bot;
 
+import net.dv8tion.jda.api.JDA;
+import org.example.db.MessageRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.example.db.MessageRepository;
 
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -15,6 +18,7 @@ import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -91,6 +95,31 @@ class DailyMessageSchedulerTest {
         assertEquals(4, sends.get());
         assertEquals(List.of(1L, 2L, 4L), taskScheduler.retryDelaysMinutes);
         assertEquals("2026-07-29", repository.getLastDailyMessageDate().orElseThrow().toString());
+    }
+
+    @Test
+    void reportsMissingDiscordChannelAsDeliveryFailure() throws Exception {
+        JDA jda = (JDA) Proxy.newProxyInstance(
+                JDA.class.getClassLoader(),
+                new Class<?>[]{JDA.class},
+                (proxy, method, arguments) -> null
+        );
+        Method factory = DailyMessageScheduler.class.getDeclaredMethod(
+                "createJdaMessageSender",
+                JDA.class,
+                String.class
+        );
+        factory.setAccessible(true);
+        DailyMessageScheduler.DailyMessageSender sender =
+                (DailyMessageScheduler.DailyMessageSender) factory.invoke(null, jda, "123456789012345678");
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+
+        sender.send("daily message", () -> { }, failure::set);
+
+        assertEquals(
+                "Discord channel not found for id 123456789012345678",
+                failure.get().getMessage()
+        );
     }
 
     private static DailyMessageScheduler scheduler(

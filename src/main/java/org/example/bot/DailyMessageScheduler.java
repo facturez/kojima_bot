@@ -158,7 +158,7 @@ public class DailyMessageScheduler {
         return (messageText, success, failure) -> {
             TextChannel channel = jda.getTextChannelById(channelId);
             if (channel == null) {
-                System.err.println("Daily message failed: channel not found for id " + channelId);
+                failure.accept(new IllegalStateException("Discord channel not found for id " + channelId));
                 return;
             }
 
