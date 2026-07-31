@@ -1,9 +1,13 @@
 package org.example.bot;
 
+import net.dv8tion.jda.api.Permission;
+import net.dv8tion.jda.api.entities.channel.ChannelType;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
+import net.dv8tion.jda.api.interactions.commands.DefaultMemberPermissions;
 import net.dv8tion.jda.api.interactions.commands.build.CommandData;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import net.dv8tion.jda.api.interactions.commands.build.OptionData;
+import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
 
 import java.util.List;
 
@@ -81,7 +85,33 @@ public final class SlashCommandDefinitions {
                                         "Причина заключения",
                                         false
                                 )
-                        )
+                        ),
+                Commands.slash("setup", "Настроить Kojima Bot для этого сервера")
+                        .setDefaultPermissions(DefaultMemberPermissions.enabledFor(Permission.MANAGE_SERVER))
+                        .setGuildOnly(true)
+                        .addSubcommands(
+                                new SubcommandData("daily", "Настроить ежедневное сообщение").addOptions(
+                                        new OptionData(OptionType.BOOLEAN, "enabled", "Включить или выключить", false),
+                                        new OptionData(OptionType.CHANNEL, "channel", "Канал ежедневного сообщения", false)
+                                                .setChannelTypes(ChannelType.TEXT),
+                                        new OptionData(OptionType.STRING, "timezone", "IANA timezone, например Europe/Moscow", false),
+                                        new OptionData(OptionType.STRING, "message_prefix", "Префикс сообщения", false),
+                                        new OptionData(OptionType.STRING, "base_date", "Базовая дата YYYY-MM-DD", false),
+                                        new OptionData(OptionType.INTEGER, "base_day_number", "Номер дня на базовую дату", false)
+                                ),
+                                new SubcommandData("call", "Настроить команду зов").addOptions(
+                                        new OptionData(OptionType.BOOLEAN, "enabled", "Включить или выключить", false),
+                                        new OptionData(OptionType.STRING, "message", "Текст призыва", false),
+                                        new OptionData(OptionType.INTEGER, "repeat_count", "Количество повторов от 1 до 10", false).setRequiredRange(1, 10),
+                                        new OptionData(OptionType.ROLE, "allowed_role", "Разрешённая роль", false),
+                                        new OptionData(OptionType.STRING, "role_action", "Действие над ролью", false)
+                                                .addChoice("Добавить", "add").addChoice("Удалить", "remove").addChoice("Очистить все", "clear")
+                                ),
+                                new SubcommandData("archive", "Настроить архив сообщений").addOptions(
+                                        new OptionData(OptionType.BOOLEAN, "enabled", "Включить или выключить архив", true)
+                                )
+                        ),
+                Commands.slash("config", "Показать конфигурацию этого сервера").setGuildOnly(true)
         );
     }
 }

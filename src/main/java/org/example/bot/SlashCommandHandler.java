@@ -13,6 +13,8 @@ import net.dv8tion.jda.api.interactions.commands.OptionMapping;
 import net.dv8tion.jda.api.requests.restaction.AuditableRestAction;
 import org.example.db.MessageRepository;
 import org.example.db.StoredMessage;
+import org.example.db.GuildConfigRepository;
+import org.example.db.CallSettings;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -32,9 +34,18 @@ public class SlashCommandHandler {
             DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm").withZone(ZoneId.systemDefault());
 
     private final MessageRepository repository;
+    private final GuildConfigRepository configs;
+    private final SetupCommandHandler setupHandler;
 
     public SlashCommandHandler(MessageRepository repository) {
+        this(repository, null, null);
+    }
+
+    public SlashCommandHandler(MessageRepository repository, GuildConfigRepository configs,
+                               SetupCommandHandler setupHandler) {
         this.repository = repository;
+        this.configs = configs;
+        this.setupHandler = setupHandler;
     }
 
     public void handle(SlashCommandInteractionEvent event) {
@@ -58,6 +69,10 @@ public class SlashCommandHandler {
             case "last" -> sendRecentMessages(event);
             case "зов" -> callEveryone(event);
             case "clear" -> clearMessages(event);
+            case "setup", "config" -> {
+                if (setupHandler == null) reply(event, "Конфигурация пока недоступна.");
+                else setupHandler.handle(event);
+            }
             case SlashCommandContract.DEPORT,
                  SlashCommandContract.MAGADAN,
                  SlashCommandContract.KPZ -> moderateMember(event);
@@ -167,10 +182,15 @@ public class SlashCommandHandler {
     }
 
     private void sendStats(SlashCommandInteractionEvent event) {
+        if (!event.isFromGuild()) {
+            reply(event, "Команда /stats работает только на сервере.");
+            return;
+        }
         event.deferReply().queue(hook -> {
             try {
-                long totalMessages = repository.countMessages();
-                long currentUserMessages = repository.countMessagesByAuthor(event.getUser().getId());
+                String guildId = event.getGuild().getId();
+                long totalMessages = repository.countMessages(guildId);
+                long currentUserMessages = repository.countMessagesByAuthor(guildId, event.getUser().getId());
                 editOriginal(hook, """
                         Статистика базы:
                         Всего сообщений: %d
@@ -197,7 +217,7 @@ public class SlashCommandHandler {
         event.deferReply().queue(hook -> {
             try {
                 List<StoredMessage> recentMessages =
-                        repository.findRecentMessages(event.getChannel().getId(), limit);
+                        repository.findRecentMessages(event.getGuild().getId(), event.getChannel().getId(), limit);
                 if (recentMessages.isEmpty()) {
                     editOriginal(hook, "В базе пока нет сообщений для этого канала.");
                     return;
@@ -239,19 +259,33 @@ public class SlashCommandHandler {
     }
 
     private void callEveryone(SlashCommandInteractionEvent event) {
+        if (!event.isFromGuild()) {
+            reply(event, "Эта команда работает только на сервере.");
+            return;
+        }
         if (!ensureCallPermission(event)) {
             return;
         }
 
-        String callText = AdminCommandConfig.CALL_MESSAGE_TEXT;
+        if (configs == null) {
+            reply(event, "Конфигурация сервера недоступна.");
+            return;
+        }
+        CallSettings settings = configs.requireConfig(event.getGuild().getId()).call();
+        if (!settings.enabled()) {
+            reply(event, "Команда /зов отключена на этом сервере.");
+            return;
+        }
+        String callText = settings.messageText();
         if (callText == null || callText.isBlank()) {
-            reply(event, "Заполни текст команды /зов в AdminCommandConfig.java");
+            reply(event, "Настрой текст команды через /setup call.");
             return;
         }
 
         String payload = "@everyone " + callText.trim();
         event.reply(payload).queue(hook -> {
-            for (int i = 1; i < AdminCommandConfig.CALL_REPEAT_COUNT; i++) {
+            int repeatCount = settings.repeatCount();
+            for (int i = 1; i < repeatCount; i++) {
                 hook.sendMessage(payload).queue(
                         null,
                         failure -> System.err.println(
@@ -402,7 +436,7 @@ public class SlashCommandHandler {
         if (CommandAuthorization.canCallEveryone(
                 member.hasPermission(Permission.ADMINISTRATOR),
                 memberRoleIds,
-                AdminCommandConfig.CALL_ALLOWED_ROLE_IDS
+                configs == null ? List.of() : configs.requireConfig(event.getGuild().getId()).call().allowedRoleIds()
         )) {
             return true;
         }

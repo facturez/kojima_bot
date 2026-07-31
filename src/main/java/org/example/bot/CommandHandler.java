@@ -8,6 +8,8 @@ import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 import org.example.db.MessageRepository;
 import org.example.db.StoredMessage;
+import org.example.db.GuildConfigRepository;
+import org.example.db.CallSettings;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
@@ -22,9 +24,15 @@ public class CommandHandler {
             DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm").withZone(ZoneId.systemDefault());
 
     private final MessageRepository repository;
+    private final GuildConfigRepository configs;
 
     public CommandHandler(MessageRepository repository) {
+        this(repository, null);
+    }
+
+    public CommandHandler(MessageRepository repository, GuildConfigRepository configs) {
         this.repository = repository;
+        this.configs = configs;
     }
 
     public boolean handle(Message message) {
@@ -74,9 +82,14 @@ public class CommandHandler {
     }
 
     private void sendStats(Message message) {
+        if (!message.isFromGuild()) {
+            sendMessage(message.getChannel(), "Команда !stats работает только на сервере.");
+            return;
+        }
         try {
-            long totalMessages = repository.countMessages();
-            long currentUserMessages = repository.countMessagesByAuthor(message.getAuthor().getId());
+            String guildId = message.getGuild().getId();
+            long totalMessages = repository.countMessages(guildId);
+            long currentUserMessages = repository.countMessagesByAuthor(guildId, message.getAuthor().getId());
 
             String response = """
                     Статистика базы:
@@ -111,7 +124,8 @@ public class CommandHandler {
         }
 
         try {
-            List<StoredMessage> recentMessages = repository.findRecentMessages(message.getChannel().getId(), limit);
+            List<StoredMessage> recentMessages = repository.findRecentMessages(
+                    message.getGuild().getId(), message.getChannel().getId(), limit);
             if (recentMessages.isEmpty()) {
                 sendMessage(message.getChannel(), "В базе пока нет сообщений для этого канала.");
                 return;
@@ -150,18 +164,32 @@ public class CommandHandler {
     }
 
     private void callEveryone(Message message) {
+        if (!message.isFromGuild()) {
+            sendMessage(message.getChannel(), "Эта команда работает только на сервере.");
+            return;
+        }
         if (!ensureCallPermission(message)) {
             return;
         }
 
-        String callText = AdminCommandConfig.CALL_MESSAGE_TEXT;
+        if (configs == null) {
+            sendMessage(message.getChannel(), "Конфигурация сервера недоступна.");
+            return;
+        }
+        CallSettings settings = configs.requireConfig(message.getGuild().getId()).call();
+        if (!settings.enabled()) {
+            sendMessage(message.getChannel(), "Команда !зов отключена на этом сервере.");
+            return;
+        }
+        String callText = settings.messageText();
         if (callText == null || callText.isBlank()) {
-            sendMessage(message.getChannel(), "Заполни текст команды !зов в AdminCommandConfig.java");
+            sendMessage(message.getChannel(), "Настрой текст команды через /setup call.");
             return;
         }
 
         String payload = "@everyone " + callText.trim();
-        for (int i = 0; i < AdminCommandConfig.CALL_REPEAT_COUNT; i++) {
+        int repeatCount = settings.repeatCount();
+        for (int i = 0; i < repeatCount; i++) {
             sendMessage(message.getChannel(), payload);
         }
     }
@@ -269,7 +297,7 @@ public class CommandHandler {
         if (CommandAuthorization.canCallEveryone(
                 member.hasPermission(Permission.ADMINISTRATOR),
                 memberRoleIds,
-                AdminCommandConfig.CALL_ALLOWED_ROLE_IDS
+                configs == null ? List.of() : configs.requireConfig(message.getGuild().getId()).call().allowedRoleIds()
         )) {
             return true;
         }

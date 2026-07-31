@@ -25,6 +25,8 @@ import net.dv8tion.jda.api.requests.restaction.interactions.ReplyCallbackAction;
 import net.dv8tion.jda.api.utils.data.DataObject;
 import org.example.db.MessageRepository;
 import org.example.db.StoredMessage;
+import org.example.db.GuildConfigRepository;
+import org.example.db.CallSettingsPatch;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -37,6 +39,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -181,8 +184,12 @@ class SlashCommandHandlerTest {
     void callEveryoneKeepsTheConfiguredAuthorizationAndRepeatCount() {
         InteractionFixture interaction = InteractionFixture.guild("зов");
         interaction.administrator = true;
+        GuildConfigRepository configs = new GuildConfigRepository(tempDir.resolve("call-config.db").toString());
+        configs.activateGuild("guild-id", "Guild");
+        configs.updateCall("guild-id", new CallSettingsPatch(Optional.of(true),
+                Optional.of(AdminCommandConfig.CALL_MESSAGE_TEXT), Optional.of(AdminCommandConfig.CALL_REPEAT_COUNT)));
 
-        new SlashCommandHandler(repository()).handle(interaction.event());
+        new SlashCommandHandler(repository(), configs, null).handle(interaction.event());
 
         String expected = "@everyone " + AdminCommandConfig.CALL_MESSAGE_TEXT.trim();
         assertEquals(AdminCommandConfig.CALL_REPEAT_COUNT, interaction.responses.size());
@@ -555,18 +562,18 @@ class SlashCommandHandlerTest {
         }
 
         @Override
-        public long countMessages() {
+        public long countMessages(String guildId) {
             return 12;
         }
 
         @Override
-        public long countMessagesByAuthor(String authorId) {
+        public long countMessagesByAuthor(String guildId, String authorId) {
             countedAuthorId = authorId;
             return 3;
         }
 
         @Override
-        public List<StoredMessage> findRecentMessages(String channelId, int limit) {
+        public List<StoredMessage> findRecentMessages(String guildId, String channelId, int limit) {
             recentChannelId = channelId;
             recentLimit = limit;
             return recentMessages;

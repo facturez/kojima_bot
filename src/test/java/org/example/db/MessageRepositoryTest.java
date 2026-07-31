@@ -35,9 +35,9 @@ class MessageRepositoryTest {
         repository.saveStoredMessage("m1", "c1", "g1", "a1", "user", "one", NOW.minusSeconds(60));
         repository.saveStoredMessage("m2", "c1", "g1", "a1", "user", "two", NOW.minusSeconds(30));
 
-        repository.deleteMessage("m1");
+        repository.deleteMessage("g1", "m1");
 
-        assertEquals(List.of("two"), repository.findRecentMessages("c1", 20)
+        assertEquals(List.of("two"), repository.findRecentMessages("g1", "c1", 20)
                 .stream().map(StoredMessage::content).toList());
     }
 
@@ -47,9 +47,9 @@ class MessageRepositoryTest {
         repository.saveStoredMessage("m2", "c1", "g1", "a1", "user", "two", NOW.minusSeconds(30));
         repository.saveStoredMessage("m3", "c1", "g1", "a1", "user", "three", NOW);
 
-        repository.deleteMessages(List.of("m1", "m3"));
+        repository.deleteMessages("g1", List.of("m1", "m3"));
 
-        assertEquals(List.of("two"), repository.findRecentMessages("c1", 20)
+        assertEquals(List.of("two"), repository.findRecentMessages("g1", "c1", 20)
                 .stream().map(StoredMessage::content).toList());
     }
 
@@ -58,7 +58,7 @@ class MessageRepositoryTest {
         repository.saveStoredMessage("old", "c1", "g1", "a1", "user", "old", NOW.minus(31, ChronoUnit.DAYS));
         repository.saveStoredMessage("new", "c1", "g1", "a1", "user", "new", NOW.minus(1, ChronoUnit.DAYS));
 
-        assertEquals(List.of("new"), repository.findRecentMessages("c1", 20)
+        assertEquals(List.of("new"), repository.findRecentMessages("g1", "c1", 20)
                 .stream().map(StoredMessage::content).toList());
     }
 
@@ -68,7 +68,20 @@ class MessageRepositoryTest {
         repository.saveStoredMessage("new", "c1", "g1", "a1", "user", "new", NOW.minus(1, ChronoUnit.DAYS));
 
         assertEquals(1, repository.deleteExpiredMessages());
-        assertEquals(List.of("new"), repository.findRecentMessages("c1", 20)
+        assertEquals(List.of("new"), repository.findRecentMessages("g1", "c1", 20)
+                .stream().map(StoredMessage::content).toList());
+    }
+
+    @Test
+    void scopesEveryArchiveOperationToGuild() {
+        repository.saveStoredMessage("a", "same", "g1", "author", "user", "one", NOW);
+        repository.saveStoredMessage("b", "same", "g2", "author", "user", "two", NOW);
+
+        assertEquals(1, repository.countMessages("g1"));
+        assertEquals(1, repository.countMessagesByAuthor("g2", "author"));
+        repository.deleteMessage("g1", "b");
+
+        assertEquals(List.of("two"), repository.findRecentMessages("g2", "same", 20)
                 .stream().map(StoredMessage::content).toList());
     }
 }

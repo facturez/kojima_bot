@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class MessageListenerTest {
     @Test
@@ -67,7 +68,7 @@ class MessageListenerTest {
     void deletesArchivedMessageByDiscordId(@TempDir Path temporaryDirectory) {
         RecordingRepository repository = new RecordingRepository(temporaryDirectory.resolve("archive.db"));
 
-        new MessageListener(repository).deleteArchivedMessage("discord-message-id");
+        new MessageListener(repository).deleteArchivedMessage("guild-id", "discord-message-id");
 
         assertEquals("discord-message-id", repository.deletedMessageId);
     }
@@ -82,7 +83,7 @@ class MessageListenerTest {
         try {
             System.setErr(new PrintStream(errorOutput));
 
-            assertDoesNotThrow(() -> new MessageListener(repository).deleteArchivedMessage("discord-message-id"));
+            assertDoesNotThrow(() -> new MessageListener(repository).deleteArchivedMessage("guild-id", "discord-message-id"));
         } finally {
             System.setErr(originalError);
         }
@@ -99,7 +100,7 @@ class MessageListenerTest {
         }
 
         @Override
-        public void deleteMessage(String messageId) {
+        public void deleteMessage(String guildId, String messageId) {
             deletedMessageId = messageId;
             if (failure != null) {
                 throw failure;
@@ -136,5 +137,14 @@ class MessageListenerTest {
             return '\0';
         }
         return null;
+    }
+
+    @Test
+    void archivesOnlyEnabledHumanGuildMessages() {
+        assertTrue(MessageListener.shouldArchive(true, false, false, true));
+        assertFalse(MessageListener.shouldArchive(false, false, false, true));
+        assertFalse(MessageListener.shouldArchive(true, false, false, false));
+        assertFalse(MessageListener.shouldArchive(true, true, false, true));
+        assertFalse(MessageListener.shouldArchive(true, false, true, true));
     }
 }

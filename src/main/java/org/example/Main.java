@@ -3,14 +3,19 @@ package org.example;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.requests.GatewayIntent;
-import org.example.bot.DailyMessageScheduler;
+import org.example.bot.MultiGuildDailyMessageScheduler;
+import org.example.bot.CommandHandler;
+import org.example.bot.SlashCommandHandler;
+import org.example.bot.SetupCommandHandler;
+import org.example.bot.GuildLifecycleListener;
+import org.example.bot.LegacyConfigLoader;
 import org.example.bot.MessageListener;
-import org.example.bot.ScheduledMessageConfig;
 import org.example.bot.SlashCommandDefinitions;
 import org.example.db.MessageRetentionConfig;
 import org.example.db.MessageRepository;
-
-import java.util.function.Supplier;
+import org.example.db.DatabaseConnectionFactory;
+import org.example.db.DatabaseMigrator;
+import org.example.db.GuildConfigRepository;
 
 public class Main {
     public static void main(String[] args) {
@@ -23,7 +28,10 @@ public class Main {
 
         String databasePath = System.getenv().getOrDefault("BOT_DB_PATH", "bot-data.db");
         int retentionDays = MessageRetentionConfig.parseDays(System.getenv("MESSAGE_RETENTION_DAYS"));
+        DatabaseConnectionFactory connections = new DatabaseConnectionFactory(databasePath);
+        new DatabaseMigrator(connections).migrate();
         MessageRepository repository = new MessageRepository(databasePath, retentionDays, java.time.Clock.systemUTC());
+        GuildConfigRepository configs = new GuildConfigRepository(connections);
 
         try {
             JDA jda = JDABuilder.createDefault(token)
@@ -32,9 +40,24 @@ public class Main {
                             GatewayIntent.DIRECT_MESSAGES,
                             GatewayIntent.MESSAGE_CONTENT
                     )
-                    .addEventListeners(new MessageListener(repository))
                     .build()
                     .awaitReady();
+
+            LegacyConfigLoader.fromEnvironment(System.getenv()).ifPresent(bootstrap -> {
+                String name = jda.getGuildById(bootstrap.guildId()) == null
+                        ? bootstrap.guildId() : jda.getGuildById(bootstrap.guildId()).getName();
+                configs.bootstrapLegacy(bootstrap.guildId(), name, bootstrap.config());
+            });
+            jda.getGuilds().forEach(guild -> configs.activateGuild(guild.getId(), guild.getName()));
+
+            MultiGuildDailyMessageScheduler scheduler = new MultiGuildDailyMessageScheduler(jda, configs);
+            SetupCommandHandler setup = new SetupCommandHandler(configs, scheduler::refreshGuild);
+            CommandHandler prefixCommands = new CommandHandler(repository, configs);
+            SlashCommandHandler slashCommands = new SlashCommandHandler(repository, configs, setup);
+            jda.addEventListener(
+                    new MessageListener(repository, configs, prefixCommands, slashCommands),
+                    new GuildLifecycleListener(configs, scheduler::refreshGuild, scheduler::removeGuild)
+            );
 
             jda.updateCommands()
                     .addCommands(SlashCommandDefinitions.all())
@@ -43,15 +66,6 @@ public class Main {
                             failure -> System.err.println("Failed to register slash commands: " + failure.getMessage())
                     );
 
-            Supplier<String> dailyMessageSupplier = ScheduledMessageConfig::buildDailyMessageText;
-
-            DailyMessageScheduler scheduler = new DailyMessageScheduler(
-                    jda,
-                    ScheduledMessageConfig.DAILY_CHANNEL_ID,
-                    dailyMessageSupplier,
-                    ScheduledMessageConfig.TIME_ZONE,
-                    repository
-            );
             scheduler.start();
 
             Runtime.getRuntime().addShutdownHook(new Thread(scheduler::shutdown));

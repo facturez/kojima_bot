@@ -3,22 +3,18 @@ package org.example.db;
 import net.dv8tion.jda.api.entities.Message;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.time.Clock;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.Optional;
 
 public class MessageRepository {
-    private final String databaseUrl;
+    private final DatabaseConnectionFactory connections;
     private final int retentionDays;
     private final Clock clock;
 
@@ -27,18 +23,21 @@ public class MessageRepository {
     }
 
     public MessageRepository(String databasePath, int retentionDays, Clock clock) {
-        this.databaseUrl = "jdbc:sqlite:" + databasePath;
+        this.connections = new DatabaseConnectionFactory(databasePath);
         this.retentionDays = retentionDays;
         this.clock = clock;
-        initialize();
+        new DatabaseMigrator(connections).migrate();
         deleteExpiredMessages();
     }
 
-    public void saveMessage(Message message) {
+    public void saveGuildMessage(String guildId, Message message) {
+        if (!message.isFromGuild() || !message.getGuild().getId().equals(guildId)) {
+            throw new IllegalArgumentException("Message does not belong to guild " + guildId);
+        }
         saveStoredMessage(
                 message.getId(),
                 message.getChannel().getId(),
-                message.isFromGuild() ? message.getGuild().getId() : null,
+                guildId,
                 message.getAuthor().getId(),
                 message.getAuthor().getAsTag(),
                 message.getContentRaw(),
@@ -76,21 +75,22 @@ public class MessageRepository {
         }
     }
 
-    public void deleteMessage(String messageId) {
-        deleteMessages(List.of(messageId));
+    public void deleteMessage(String guildId, String messageId) {
+        deleteMessages(guildId, List.of(messageId));
     }
 
-    public void deleteMessages(Collection<String> messageIds) {
+    public void deleteMessages(String guildId, Collection<String> messageIds) {
         if (messageIds.isEmpty()) {
             return;
         }
 
-        String sql = "DELETE FROM messages WHERE message_id = ?";
+        String sql = "DELETE FROM messages WHERE guild_id = ? AND message_id = ?";
         try (Connection connection = openConnection()) {
             connection.setAutoCommit(false);
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 for (String messageId : messageIds) {
-                    statement.setString(1, messageId);
+                    statement.setString(1, guildId);
+                    statement.setString(2, messageId);
                     statement.addBatch();
                 }
                 statement.executeBatch();
@@ -117,22 +117,25 @@ public class MessageRepository {
         }
     }
 
-    public long countMessages() {
-        String sql = "SELECT COUNT(*) FROM messages";
+    public long countMessages(String guildId) {
+        String sql = "SELECT COUNT(*) FROM messages WHERE guild_id = ?";
         try (Connection connection = openConnection();
-             Statement statement = connection.createStatement();
-             ResultSet resultSet = statement.executeQuery(sql)) {
-            return resultSet.getLong(1);
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, guildId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.getLong(1);
+            }
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to count messages", e);
         }
     }
 
-    public long countMessagesByAuthor(String authorId) {
-        String sql = "SELECT COUNT(*) FROM messages WHERE author_id = ?";
+    public long countMessagesByAuthor(String guildId, String authorId) {
+        String sql = "SELECT COUNT(*) FROM messages WHERE guild_id = ? AND author_id = ?";
         try (Connection connection = openConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, authorId);
+            statement.setString(1, guildId);
+            statement.setString(2, authorId);
 
             try (ResultSet resultSet = statement.executeQuery()) {
                 return resultSet.getLong(1);
@@ -142,13 +145,13 @@ public class MessageRepository {
         }
     }
 
-    public List<StoredMessage> findRecentMessages(String channelId, int limit) {
+    public List<StoredMessage> findRecentMessages(String guildId, String channelId, int limit) {
         deleteExpiredMessages();
 
         String sql = """
                 SELECT author_tag, content, created_at
                 FROM messages
-                WHERE channel_id = ?
+                WHERE guild_id = ? AND channel_id = ?
                 ORDER BY created_at DESC
                 LIMIT ?
                 """;
@@ -156,8 +159,9 @@ public class MessageRepository {
         List<StoredMessage> messages = new ArrayList<>();
         try (Connection connection = openConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, channelId);
-            statement.setInt(2, limit);
+            statement.setString(1, guildId);
+            statement.setString(2, channelId);
+            statement.setInt(3, limit);
 
             try (ResultSet resultSet = statement.executeQuery()) {
                 while (resultSet.next()) {
@@ -175,68 +179,7 @@ public class MessageRepository {
         return messages;
     }
 
-    public Optional<LocalDate> getLastDailyMessageDate() {
-        String sql = "SELECT value FROM scheduler_state WHERE key = 'daily_message_last_sent_date'";
-        try (Connection connection = openConnection();
-             Statement statement = connection.createStatement();
-             ResultSet resultSet = statement.executeQuery(sql)) {
-            if (!resultSet.next()) {
-                return Optional.empty();
-            }
-
-            return Optional.of(LocalDate.parse(resultSet.getString("value")));
-        } catch (SQLException e) {
-            throw new IllegalStateException("Failed to read daily message state", e);
-        }
-    }
-
-    public void setLastDailyMessageDate(LocalDate date) {
-        String sql = """
-                INSERT INTO scheduler_state(key, value)
-                VALUES ('daily_message_last_sent_date', ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """;
-
-        try (Connection connection = openConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, date.toString());
-            statement.executeUpdate();
-        } catch (SQLException e) {
-            throw new IllegalStateException("Failed to save daily message state", e);
-        }
-    }
-
-    private void initialize() {
-        String messagesSql = """
-                CREATE TABLE IF NOT EXISTS messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    message_id TEXT NOT NULL UNIQUE,
-                    channel_id TEXT NOT NULL,
-                    guild_id TEXT,
-                    author_id TEXT NOT NULL,
-                    author_tag TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    stored_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                """;
-        String schedulerStateSql = """
-                CREATE TABLE IF NOT EXISTS scheduler_state (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                )
-                """;
-
-        try (Connection connection = openConnection();
-             Statement statement = connection.createStatement()) {
-            statement.execute(messagesSql);
-            statement.execute(schedulerStateSql);
-        } catch (SQLException e) {
-            throw new IllegalStateException("Failed to initialize database", e);
-        }
-    }
-
     private Connection openConnection() throws SQLException {
-        return DriverManager.getConnection(databaseUrl);
+        return connections.open();
     }
 }

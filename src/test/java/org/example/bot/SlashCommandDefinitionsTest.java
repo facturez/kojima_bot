@@ -18,10 +18,10 @@ class SlashCommandDefinitionsTest {
         List<CommandData> definitions = SlashCommandDefinitions.all();
 
         assertEquals(
-                Set.of("help", "ping", "stats", "last", "зов", "clear", "deport", "magadan", "kpz"),
+                Set.of("help", "ping", "stats", "last", "зов", "clear", "deport", "magadan", "kpz", "setup", "config"),
                 definitions.stream().map(CommandData::getName).collect(java.util.stream.Collectors.toSet())
         );
-        assertEquals(9, definitions.size());
+        assertEquals(11, definitions.size());
         assertThrows(UnsupportedOperationException.class, definitions::clear);
     }
 

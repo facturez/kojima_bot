@@ -3,6 +3,7 @@ package org.example.bot;
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.Message;
+import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.channel.unions.GuildMessageChannelUnion;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 import net.dv8tion.jda.api.entities.channel.unions.MessageChannelUnion;
@@ -69,6 +70,10 @@ class CommandHandlerTest {
                             || !Arrays.asList(permissions).contains(Permission.MESSAGE_MANAGE);
                 }
         );
+        Guild guild = (Guild) Proxy.newProxyInstance(
+                Guild.class.getClassLoader(), new Class<?>[]{Guild.class},
+                (proxy, method, arguments) -> method.getName().equals("getId") ? "guild-id" : null
+        );
         Message message = (Message) Proxy.newProxyInstance(
                 Message.class.getClassLoader(),
                 new Class<?>[]{Message.class},
@@ -76,6 +81,7 @@ class CommandHandlerTest {
                     case "getContentRaw" -> "!last";
                     case "getChannel", "getGuildChannel" -> channel;
                     case "getMember" -> member;
+                    case "getGuild" -> guild;
                     case "isFromGuild" -> true;
                     default -> null;
                 }
@@ -134,6 +140,10 @@ class CommandHandlerTest {
                     return null;
                 }
         );
+        Guild archiveGuild = (Guild) Proxy.newProxyInstance(
+                Guild.class.getClassLoader(), new Class<?>[]{Guild.class},
+                (proxy, method, arguments) -> method.getName().equals("getId") ? "guild-id" : null
+        );
         Message message = (Message) Proxy.newProxyInstance(
                 Message.class.getClassLoader(),
                 new Class<?>[]{Message.class},
@@ -141,6 +151,7 @@ class CommandHandlerTest {
                     case "getContentRaw" -> "!last";
                     case "getChannel", "getGuildChannel" -> channel;
                     case "getMember" -> member;
+                    case "getGuild" -> archiveGuild;
                     case "isFromGuild" -> true;
                     default -> null;
                 }
@@ -149,7 +160,7 @@ class CommandHandlerTest {
                 tempDir.resolve("mention-archive.db").toString()
         ) {
             @Override
-            public List<StoredMessage> findRecentMessages(String channelId, int limit) {
+            public List<StoredMessage> findRecentMessages(String guildId, String channelId, int limit) {
                 return List.of(new StoredMessage(
                         "reader",
                         "@everyone <@123456789012345678> <@&987654321098765432>",
