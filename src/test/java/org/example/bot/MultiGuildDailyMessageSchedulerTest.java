@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class MultiGuildDailyMessageSchedulerTest {
@@ -126,6 +127,72 @@ class MultiGuildDailyMessageSchedulerTest {
     }
 
     @Test
+    void synchronousMidnightFailureRetriesAndKeepsFollowingMidnightsScheduled(@TempDir Path temporaryDirectory) {
+        GuildConfigRepository configs = configuredGuild(temporaryDirectory);
+        configs.setLastDailyMessageDate("guild", LocalDate.of(2026, 7, 31));
+        RecordingDiscord discord = new RecordingDiscord(0);
+        discord.synchronousFailures = 1;
+        RecordingExecutor executor = new RecordingExecutor();
+        MutableClock clock = new MutableClock(Instant.parse("2026-07-31T20:59:59Z"));
+        new MultiGuildDailyMessageScheduler(discord.jda, configs, clock, executor).start();
+        assertEquals(1000, executor.dailyTasks.get(0).getDelay(TimeUnit.MILLISECONDS));
+
+        clock.advance(Duration.ofSeconds(1));
+        assertDoesNotThrow(executor::runNextDaily);
+        assertEquals(List.of(1L), executor.retryDelaysMinutes);
+        assertEquals(1, executor.dailyTasks.size());
+        executor.runNextRetry();
+        assertEquals(Optional.of(LocalDate.of(2026, 8, 1)), configs.getLastDailyMessageDate("guild"));
+
+        clock.advance(Duration.ofDays(1));
+        executor.runNextDaily();
+        assertEquals(List.of("daily 110", "daily 111"), discord.messages);
+        assertEquals(Optional.of(LocalDate.of(2026, 8, 2)), configs.getLastDailyMessageDate("guild"));
+    }
+
+    @Test
+    void temporaryStateReadFailureAtStartupRetriesAndSchedulesMidnight(@TempDir Path temporaryDirectory) {
+        FailingStateRepository configs = new FailingStateRepository(temporaryDirectory.resolve("config.db"));
+        configureGuild(configs);
+        configs.failNextRead = true;
+        RecordingDiscord discord = new RecordingDiscord(0);
+        RecordingExecutor executor = new RecordingExecutor();
+
+        assertDoesNotThrow(() -> scheduler(configs, discord, executor).start());
+        assertEquals(1, executor.dailyTasks.size());
+        assertEquals(List.of(1L), executor.retryDelaysMinutes);
+        executor.runNextRetry();
+
+        assertEquals(List.of("daily 109"), discord.messages);
+        assertEquals(Optional.of(LocalDate.of(2026, 7, 31)), configs.getLastDailyMessageDate("guild"));
+    }
+
+    @Test
+    void stateWriteFailureAfterDeliveryDoesNotBlockFollowingDays(@TempDir Path temporaryDirectory) {
+        FailingStateRepository configs = new FailingStateRepository(temporaryDirectory.resolve("config.db"));
+        configureGuild(configs);
+        configs.setLastDailyMessageDate("guild", LocalDate.of(2026, 7, 31));
+        configs.failNextWrite = true;
+        RecordingDiscord discord = new RecordingDiscord(0);
+        discord.deferSuccess = true;
+        RecordingExecutor executor = new RecordingExecutor();
+        MutableClock clock = new MutableClock(Instant.parse("2026-07-31T21:00:00Z"));
+        MultiGuildDailyMessageScheduler scheduler = new MultiGuildDailyMessageScheduler(discord.jda, configs, clock, executor);
+
+        scheduler.start();
+        assertDoesNotThrow(discord::completeNextSuccess);
+        scheduler.refreshGuild("guild");
+        assertEquals(List.of("daily 110"), discord.messages);
+        assertTrue(executor.retryTasks.isEmpty(), "An already delivered message must not be retried");
+
+        clock.advance(Duration.ofDays(1));
+        executor.runNextDaily();
+        discord.completeNextSuccess();
+        assertEquals(List.of("daily 110", "daily 111"), discord.messages);
+        assertEquals(Optional.of(LocalDate.of(2026, 8, 2)), configs.getLastDailyMessageDate("guild"));
+    }
+
+    @Test
     void invalidatedMidnightTaskCannotOverwriteTheRefreshedSchedule(@TempDir Path temporaryDirectory) {
         GuildConfigRepository configs = configuredGuild(temporaryDirectory);
         configs.setLastDailyMessageDate("guild", LocalDate.of(2026, 7, 31));
@@ -142,11 +209,38 @@ class MultiGuildDailyMessageSchedulerTest {
 
     private static GuildConfigRepository configuredGuild(Path temporaryDirectory) {
         GuildConfigRepository configs = new GuildConfigRepository(temporaryDirectory.resolve("config.db").toString());
+        configureGuild(configs);
+        return configs;
+    }
+
+    private static void configureGuild(GuildConfigRepository configs) {
         configs.activateGuild("guild", "Legacy Guild");
         configs.updateDaily("guild", new DailySettingsPatch(Optional.of(true), Optional.of("channel"),
                 Optional.of(ZoneId.of("Europe/Moscow")), Optional.of("daily"),
                 Optional.of(LocalDate.of(2026, 7, 29)), Optional.of(107)));
-        return configs;
+    }
+
+    private static final class FailingStateRepository extends GuildConfigRepository {
+        private boolean failNextRead;
+        private boolean failNextWrite;
+
+        private FailingStateRepository(Path database) { super(database.toString()); }
+
+        @Override public Optional<LocalDate> getLastDailyMessageDate(String guildId) {
+            if (failNextRead) {
+                failNextRead = false;
+                throw new IllegalStateException("temporary state read failure");
+            }
+            return super.getLastDailyMessageDate(guildId);
+        }
+
+        @Override public void setLastDailyMessageDate(String guildId, LocalDate date) {
+            if (failNextWrite) {
+                failNextWrite = false;
+                throw new IllegalStateException("temporary state write failure");
+            }
+            super.setLastDailyMessageDate(guildId, date);
+        }
     }
 
     private static MultiGuildDailyMessageScheduler scheduler(
@@ -156,6 +250,9 @@ class MultiGuildDailyMessageSchedulerTest {
     }
 
     private static final class RecordingDiscord {
+        private int synchronousFailures;
+        private boolean deferSuccess;
+        private final List<Runnable> pendingSuccesses = new ArrayList<>();
         private final AtomicInteger attempts = new AtomicInteger();
         private final List<String> messages = new ArrayList<>();
         private final JDA jda;
@@ -169,6 +266,7 @@ class MultiGuildDailyMessageSchedulerTest {
                     @SuppressWarnings("unchecked") Consumer<Object> success = (Consumer<Object>) arguments[0];
                     @SuppressWarnings("unchecked") Consumer<Throwable> failure = (Consumer<Throwable>) arguments[1];
                     if (attempt <= failuresBeforeSuccess) failure.accept(new IllegalStateException("temporary failure"));
+                    else if (deferSuccess) pendingSuccesses.add(() -> success.accept(null));
                     else success.accept(null);
                 }
                 return defaultValue(method.getReturnType());
@@ -176,6 +274,10 @@ class MultiGuildDailyMessageSchedulerTest {
             TextChannel channel = proxy(TextChannel.class, (method, arguments) -> switch (method.getName()) {
                 case "getGuild" -> guild;
                 case "sendMessage" -> {
+                    if (synchronousFailures > 0) {
+                        synchronousFailures--;
+                        throw new IllegalStateException("temporary synchronous send failure");
+                    }
                     messages.add(arguments[0].toString());
                     yield action;
                 }
@@ -184,6 +286,8 @@ class MultiGuildDailyMessageSchedulerTest {
             jda = proxy(JDA.class, (method, arguments) ->
                     method.getName().equals("getTextChannelById") ? channel : defaultValue(method.getReturnType()));
         }
+
+        void completeNextSuccess() { pendingSuccesses.remove(0).run(); }
     }
 
     private interface Invocation {
@@ -226,6 +330,7 @@ class MultiGuildDailyMessageSchedulerTest {
         }
 
         void runNextDaily() {
+            while (dailyTasks.get(0).isCancelled()) dailyTasks.remove(0);
             dailyTasks.remove(0).run();
         }
 
